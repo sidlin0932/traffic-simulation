@@ -214,14 +214,35 @@ const NK = (r, c) => r * NUM_V + c;
 const NK_R = (k) => Math.floor(k / NUM_V);
 const NK_C = (k) => k % NUM_V;
 
-function buildGraph(g) {
+function buildGraph(g, revMode, oneWayPairs) {
   const adj = Array.from({ length: NUM_H * NUM_V }, () => []);
   const sev = (r, c) =>
     (g.tjunc && (g.tjunc[r][c] === "down" || g.tjunc[r + 1][c] === "up"));
   for (let r = 0; r < NUM_H; r++) {
+    const isHBwdReversed = (idx) => (idx === 2 && revMode === "eastbound_peak") || (oneWayPairs && idx % 2 === 0);
+    const isHFwdReversed = (idx) => (idx === 2 && revMode === "westbound_peak") || (oneWayPairs && idx % 2 === 1);
+    
+    const bwdRev = isHBwdReversed(r);
+    const fwdRev = isHFwdReversed(r);
+
     for (let c = 0; c < NUM_V; c++) {
-      if (c + 1 < NUM_V) { adj[NK(r, c)].push(NK(r, c + 1)); adj[NK(r, c + 1)].push(NK(r, c)); }
-      if (r + 1 < NUM_H && !sev(r, c)) { adj[NK(r, c)].push(NK(r + 1, c)); adj[NK(r + 1, c)].push(NK(r, c)); }
+      if (c + 1 < NUM_V) {
+        if (bwdRev && fwdRev) {
+          adj[NK(r, c + 1)].push(NK(r, c));
+          adj[NK(r, c)].push(NK(r, c + 1));
+        } else if (bwdRev) {
+          adj[NK(r, c)].push(NK(r, c + 1));
+        } else if (fwdRev) {
+          adj[NK(r, c + 1)].push(NK(r, c));
+        } else {
+          adj[NK(r, c)].push(NK(r, c + 1));
+          adj[NK(r, c + 1)].push(NK(r, c));
+        }
+      }
+      if (r + 1 < NUM_H && !sev(r, c)) {
+        adj[NK(r, c)].push(NK(r + 1, c));
+        adj[NK(r + 1, c)].push(NK(r, c));
+      }
     }
   }
   return adj;
@@ -531,7 +552,7 @@ function processTurns(g, state, turnProb, rng, revMode, oneWayPairs) {
 
 function processRoutes(g, state, rng, revMode, oneWayPairs) {
   const { hFwd, hBwd, vFwd, vBwd, lights } = state;
-  const adj = state.adj || buildGraph(g);
+  const adj = state.adj || buildGraph(g, revMode, oneWayPairs);
   const wallOf = new WeakMap();
   if (state.vWallF) state.vFwd.forEach((rd, c) => wallOf.set(rd, state.vWallF[c]));
   if (state.vWallB) state.vBwd.forEach((rd, c) => wallOf.set(rd, state.vWallB[c]));
@@ -719,7 +740,7 @@ function stepSim(g, state, pSlow, turnProb, rng, pInject, opts) {
     lastCrossings: counter.hF + counter.hB + counter.vF + counter.vB,
     lastDir: counter,                 
     vWallF, vWallB,
-    adj: adj || (routed ? buildGraph(g) : null),
+    adj: adj || (routed ? buildGraph(g, revMode, oneWayPairs) : null),
     validExits: routed ? (g._validExits || (g._validExits = allExits().filter(([eb, el]) => exitSegmentClear(g, eb, el)))) : null,
     tick: tick + 1,
     arrivals: (state.arrivals || 0),
@@ -834,7 +855,7 @@ function runExperiment(seed, mode, { density, pSlow, turnP, waveSpeed, jitterOn,
   const g = buildGeometry(seed, jitterOn, missingOn);
   const rng = mulberry32((typeof seed === "string" ? hashString(seed) : seed) ^ hashString(mode));
   const pInject = routed ? densityToInjectRouted(density) : densityToInject(density);
-  const adj = routed ? buildGraph(g) : null;
+  const adj = routed ? buildGraph(g, reversibleMode, oneWayPairs) : null;
   const idRef = { n: 0 };
   let state = initState(g, density, mode, waveSpeed, seed, routed);
   state.tick = 0;
@@ -1147,7 +1168,7 @@ export default function TrafficSim() {
     simRef.current = initState(geoRef.current, density, signalMode, waveSpeed, seed, routed);
     simRef.current.tick = 0;
     rngRef.current = mulberry32((typeof seed === "string" ? hashString(seed) : seed) ^ 0x1234);
-    adjRef.current = routed ? buildGraph(geoRef.current) : null;
+    adjRef.current = routed ? buildGraph(geoRef.current, "none", false) : null;
     idRef.current = { n: 0 };
     dirEmaRef.current = { hF: 0, hB: 0, vF: 0, vB: 0 };
     ttEmaRef.current = 0;
@@ -1163,11 +1184,12 @@ export default function TrafficSim() {
     if (!simRef.current) return;
     const pInj = routed ? densityToInjectRouted(density) : densityToInject(density);
     const t0 = simRef.current.tick || 0;
+    const currentAdj = routed ? buildGraph(geoRef.current, reversibleMode, oneWayPairs) : null;
     simRef.current = stepSim(geoRef.current, simRef.current, pSlow, turnP, rngRef.current, pInj, {
       signalMode, 
       routed: !!routed, 
       tick: t0, 
-      adj: adjRef.current, 
+      adj: currentAdj, 
       idRef: idRef.current,
       complianceRate: complianceRate / 100,
       reversibleMode,
