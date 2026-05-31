@@ -2,8 +2,8 @@ import { useState, useEffect, useRef, useCallback } from "react";
 
 const CELL_PX = 6;
 const LANE_GAP = 1;
-const NUM_H = 5;
-const NUM_V = 6;
+let NUM_H = 5;
+let NUM_V = 6;
 const SEG_LEN = 20;
 const SEG_JITTER = 10;
 const V_MAX = 5;
@@ -34,12 +34,20 @@ function mirror(pos, len) { return len - 1 - pos; }
 
 function buildGeometry(seed, jitterOn, missingOn) {
   const isTaipei = seed === "Taipei";
+  if (isTaipei) {
+    NUM_H = 9;
+    NUM_V = 11;
+  } else {
+    NUM_H = 5;
+    NUM_V = 6;
+  }
   const rng = mulberry32((typeof seed === "string" ? hashString(seed) : seed) ^ 0x9e3779b9);
 
   let segH, segV;
   if (isTaipei) {
-    segH = [10, 22, 22, 28, 44, 34, 10];
-    segV = [10, 35, 30, 30, 40, 10];
+    // Proportional to physical meters (1 cell = 50m)
+    segH = [8, 15, 11, 9, 8, 10, 16, 16, 18, 17, 14, 8];
+    segV = [8, 15, 17, 14, 12, 8, 9, 9, 14, 24, 8];
   } else {
     const seg = (n) => Array.from({ length: n }, () => {
       if (!jitterOn) return SEG_LEN;
@@ -65,11 +73,15 @@ function buildGeometry(seed, jitterOn, missingOn) {
   const vBarrier = Array.from({ length: NUM_V }, () => new Set());
 
   if (isTaipei) {
-    tjunc[1][1] = "up";
-    tjunc[1][4] = "up";
-    for (let y = 0; y < vInt[1]; y++) {
+    // Chongqing South Road (Col 1) is blocked south of Zhongxiao East Road (Row 6)
+    tjunc[6][1] = "down";
+    const yStart = vInt[6];
+    for (let y = yStart + 1; y < VLEN; y++) {
       vBarrier[1].add(y);
-      vBarrier[4].add(y);
+    }
+    // Ren'ai / Xinyi Road (Row 7) terminates at Zhongshan Road (Col 3) next to CKS Memorial Hall
+    for (let c = 0; c < 3; c++) {
+      present[7][c] = false;
     }
   } else if (missingOn) {
     for (let r = 0; r < NUM_H; r++) {
@@ -91,8 +103,10 @@ function buildGeometry(seed, jitterOn, missingOn) {
     }
   }
 
-  const hMaxSpeed = isTaipei ? [5, 4, 4, 3, 4] : new Array(NUM_H).fill(5);
-  const vMaxSpeed = isTaipei ? [5, 4, 4, 3, 4, 5] : new Array(NUM_V).fill(5);
+  // Row speed limits: Minzu: 4, Minquan: 4, Minsheng: 3, Nanjing: 4, Changan: 3, Civic Blvd: 5, Zhongxiao: 4, Ren'ai/Xinyi: 3, Heping: 4
+  const hMaxSpeed = isTaipei ? [4, 4, 3, 4, 3, 5, 4, 3, 4] : new Array(NUM_H).fill(5);
+  // Col speed limits: Huanhe: 5, Chongqing: 4, Chengde: 4, Zhongshan: 4, Linsen: 3, Xinsheng: 5, Jianguo: 5, Fuxing: 4, Dunhua: 4, Guangfu: 3, Keelung: 5
+  const vMaxSpeed = isTaipei ? [5, 4, 4, 4, 3, 5, 5, 4, 4, 3, 5] : new Array(NUM_V).fill(5);
 
   return { segH, segV, hInt, vInt, HLEN, VLEN, present, tjunc, vBarrier, isTaipei, hMaxSpeed, vMaxSpeed };
 }
@@ -179,8 +193,9 @@ function initState(g, density, signalMode, waveSpeed, seed, routed) {
 
 function stepLightsAdaptive(g, state, mode, revMode, oneWayPairs) {
   const { hFwd, hBwd, vFwd, vBwd, lights } = state;
-  const isHBwdReversed = (idx) => (idx === 2 && revMode === "eastbound_peak") || (oneWayPairs && idx % 2 === 0);
-  const isHFwdReversed = (idx) => (idx === 2 && revMode === "westbound_peak") || (oneWayPairs && idx % 2 === 1);
+  const revRow = g.isTaipei ? 5 : 2;
+  const isHBwdReversed = (idx) => (idx === revRow && revMode === "eastbound_peak") || (oneWayPairs && idx % 2 === 0);
+  const isHFwdReversed = (idx) => (idx === revRow && revMode === "westbound_peak") || (oneWayPairs && idx % 2 === 1);
 
   return lights.map((row, r) => row.map((l, c) => {
     if (mode !== "adaptive") {
@@ -234,25 +249,30 @@ function buildGraph(g, revMode, oneWayPairs) {
   const adj = Array.from({ length: NUM_H * NUM_V }, () => []);
   const sev = (r, c) =>
     (g.tjunc && (g.tjunc[r][c] === "down" || g.tjunc[r + 1][c] === "up"));
+  const revRow = g.isTaipei ? 5 : 2;
   for (let r = 0; r < NUM_H; r++) {
-    const isHBwdReversed = (idx) => (idx === 2 && revMode === "eastbound_peak") || (oneWayPairs && idx % 2 === 0);
-    const isHFwdReversed = (idx) => (idx === 2 && revMode === "westbound_peak") || (oneWayPairs && idx % 2 === 1);
+    const isHBwdReversed = (idx) => (idx === revRow && revMode === "eastbound_peak") || (oneWayPairs && idx % 2 === 0);
+    const isHFwdReversed = (idx) => (idx === revRow && revMode === "westbound_peak") || (oneWayPairs && idx % 2 === 1);
     
     const bwdRev = isHBwdReversed(r);
     const fwdRev = isHFwdReversed(r);
 
     for (let c = 0; c < NUM_V; c++) {
       if (c + 1 < NUM_V) {
-        if (bwdRev && fwdRev) {
-          adj[NK(r, c + 1)].push(NK(r, c));
-          adj[NK(r, c)].push(NK(r, c + 1));
-        } else if (bwdRev) {
-          adj[NK(r, c)].push(NK(r, c + 1));
-        } else if (fwdRev) {
-          adj[NK(r, c + 1)].push(NK(r, c));
+        if (g.isTaipei && r === 7 && c < 3) {
+          // Do not connect Ren'ai/Xinyi Road west of Zhongshan Road (Col 3)
         } else {
-          adj[NK(r, c)].push(NK(r, c + 1));
-          adj[NK(r, c + 1)].push(NK(r, c));
+          if (bwdRev && fwdRev) {
+            adj[NK(r, c + 1)].push(NK(r, c));
+            adj[NK(r, c)].push(NK(r, c + 1));
+          } else if (bwdRev) {
+            adj[NK(r, c)].push(NK(r, c + 1));
+          } else if (fwdRev) {
+            adj[NK(r, c + 1)].push(NK(r, c));
+          } else {
+            adj[NK(r, c)].push(NK(r, c + 1));
+            adj[NK(r, c + 1)].push(NK(r, c));
+          }
         }
       }
       if (r + 1 < NUM_H && !sev(r, c)) {
@@ -504,9 +524,15 @@ function exitInfo(boundary, laneIdx) {
   return { node: NK(0, laneIdx), heading: "N" }; 
 }
 
-function allExits() {
+function allExits(g) {
   const xs = [];
-  for (let r = 0; r < NUM_H; r++) { xs.push(["E", r]); xs.push(["W", r]); }
+  for (let r = 0; r < NUM_H; r++) {
+    if (g && g.isTaipei && r === 7) {
+      xs.push(["E", r]);
+    } else {
+      xs.push(["E", r]); xs.push(["W", r]);
+    }
+  }
   for (let c = 0; c < NUM_V; c++) { xs.push(["S", c]); xs.push(["N", c]); }
   return xs;
 }
@@ -594,7 +620,7 @@ function injectRouted(g, adj, road, rng, wall, pInject, tick, boundary, laneIdx,
   if (road[0] !== null || road[1] !== null || rng() >= pInject) return null;
   if (!entrySegmentClear(g, boundary, laneIdx)) return null; 
   const { node: start, heading } = entryInfo(boundary, laneIdx);
-  const exits = allExits().filter(([eb, el]) =>
+  const exits = allExits(g).filter(([eb, el]) =>
     !(eb === boundary && el === laneIdx) && exitSegmentClear(g, eb, el));
   for (let tries = 0; tries < 8 && exits.length; tries++) {
     const [eb, el] = exits[Math.floor(rng() * exits.length)];
@@ -629,8 +655,9 @@ function clearIntersections(g, state, rng, revMode, oneWayPairs) {
   if (state.vWallB) state.vBwd.forEach((rd, c) => wallOf.set(rd, state.vWallB[c]));
   const blocked = (road, pos) => { const w = wallOf.get(road); return w ? w.has(pos) : false; };
 
-  const isHBwdReversed = (idx) => (idx === 2 && revMode === "eastbound_peak") || (oneWayPairs && idx % 2 === 0);
-  const isHFwdReversed = (idx) => (idx === 2 && revMode === "westbound_peak") || (oneWayPairs && idx % 2 === 1);
+  const revRow = g.isTaipei ? 5 : 2;
+  const isHBwdReversed = (idx) => (idx === revRow && revMode === "eastbound_peak") || (oneWayPairs && idx % 2 === 0);
+  const isHFwdReversed = (idx) => (idx === revRow && revMode === "westbound_peak") || (oneWayPairs && idx % 2 === 1);
 
   function tryForward(road, pos) {
     const nxt = pos + 1;
@@ -695,13 +722,14 @@ function clearIntersections(g, state, rng, revMode, oneWayPairs) {
 function processTurns(g, state, turnProb, rng, revMode, oneWayPairs) {
   const { hFwd, hBwd, vFwd, vBwd, lights } = state;
   const turns = [];
+  const revRow = g.isTaipei ? 5 : 2;
 
   const getTurnTargets = (r, c, vp, vm) => {
     let tE = { road: hFwd[r], ti: g.hInt[c] };
     let tW = { road: hBwd[r], ti: mirror(g.hInt[c], g.HLEN) };
     
-    const bwdReversed = (r === 2 && revMode === "eastbound_peak") || (oneWayPairs && r % 2 === 0);
-    const fwdReversed = (r === 2 && revMode === "westbound_peak") || (oneWayPairs && r % 2 === 1);
+    const bwdReversed = (r === revRow && revMode === "eastbound_peak") || (oneWayPairs && r % 2 === 0);
+    const fwdReversed = (r === revRow && revMode === "westbound_peak") || (oneWayPairs && r % 2 === 1);
 
     if (bwdReversed) {
       tW = { road: hBwd[r], ti: g.hInt[c] }; // hBwd is Eastbound
@@ -752,14 +780,15 @@ function processRoutes(g, state, rng, revMode, oneWayPairs, routingStrategy) {
   if (state.vWallB) state.vBwd.forEach((rd, c) => wallOf.set(rd, state.vWallB[c]));
 
   const PATIENCE = 12; 
+  const revRow = g.isTaipei ? 5 : 2;
 
-  const isHBwdReversed = (idx) => (idx === 2 && revMode === "eastbound_peak") || (oneWayPairs && idx % 2 === 0);
-  const isHFwdReversed = (idx) => (idx === 2 && revMode === "westbound_peak") || (oneWayPairs && idx % 2 === 1);
+  const isHBwdReversed = (idx) => (idx === revRow && revMode === "eastbound_peak") || (oneWayPairs && idx % 2 === 0);
+  const isHFwdReversed = (idx) => (idx === revRow && revMode === "westbound_peak") || (oneWayPairs && idx % 2 === 1);
 
   const getTargetRoad = (heading, idx, crossCell) => {
     const roads = [];
-    const bwdReversed = (idx === 2 && revMode === "eastbound_peak") || (oneWayPairs && idx % 2 === 0);
-    const fwdReversed = (idx === 2 && revMode === "westbound_peak") || (oneWayPairs && idx % 2 === 1);
+    const bwdReversed = (idx === revRow && revMode === "eastbound_peak") || (oneWayPairs && idx % 2 === 0);
+    const fwdReversed = (idx === revRow && revMode === "westbound_peak") || (oneWayPairs && idx % 2 === 1);
 
     if (heading === "E") {
       roads.push(hFwd[idx]);
@@ -909,9 +938,10 @@ function stepSim(g, state, pSlow, turnProb, rng, pInject, opts) {
   const idRef = (opts && opts.idRef) || { n: 0 };
   const compRate = (opts && opts.complianceRate != null) ? opts.complianceRate : 0.70;
   const routingStrategy = (opts && opts.routingStrategy) || "bfs";
+  const revRow = g.isTaipei ? 5 : 2;
 
-  const isHBwdReversed = (idx) => (idx === 2 && revMode === "eastbound_peak") || (oneWayPairs && idx % 2 === 0);
-  const isHFwdReversed = (idx) => (idx === 2 && revMode === "westbound_peak") || (oneWayPairs && idx % 2 === 1);
+  const isHBwdReversed = (idx) => (idx === revRow && revMode === "eastbound_peak") || (oneWayPairs && idx % 2 === 0);
+  const isHFwdReversed = (idx) => (idx === revRow && revMode === "westbound_peak") || (oneWayPairs && idx % 2 === 1);
 
   let arrTick = 0, ttSumTick = 0, arrWin = 0, ttWin = 0;
   const countFrom = (opts && opts.countFrom != null) ? opts.countFrom : -1; 
@@ -957,7 +987,7 @@ function stepSim(g, state, pSlow, turnProb, rng, pInject, opts) {
     lastDir: counter,                 
     vWallF, vWallB,
     adj: adj || (routed ? buildGraph(g, revMode, oneWayPairs) : null),
-    validExits: routed ? (g._validExits || (g._validExits = allExits().filter(([eb, el]) => exitSegmentClear(g, eb, el)))) : null,
+    validExits: routed ? (g._validExits || (g._validExits = allExits(g).filter(([eb, el]) => exitSegmentClear(g, eb, el)))) : null,
     tick: tick + 1,
     arrivals: (state.arrivals || 0),
     travelSum: (state.travelSum || 0),
@@ -988,28 +1018,30 @@ function stepSim(g, state, pSlow, turnProb, rng, pInject, opts) {
       };
 
       res.hFwd.forEach((rd, r) => {
+        if (g.isTaipei && r === 7) return;
         if (oneWayPairs && r % 2 === 1) return;
-        if (r === 2 && revMode === "westbound_peak") return;
+        if (r === revRow && revMode === "westbound_peak") return;
         injectMix(rd, "W", r, null);
       });
       res.hBwd.forEach((rd, r) => {
+        if (g.isTaipei && r === 7) return;
         if (oneWayPairs && r % 2 === 0) {
           injectMix(rd, "W", r, null);
-        } else if (r === 2 && revMode === "eastbound_peak") {
-          injectMix(rd, "W", 2, null);
+        } else if (r === revRow && revMode === "eastbound_peak") {
+          injectMix(rd, "W", revRow, null);
         }
       });
 
       res.hBwd.forEach((rd, r) => {
         if (oneWayPairs && r % 2 === 0) return;
-        if (r === 2 && revMode === "eastbound_peak") return;
+        if (r === revRow && revMode === "eastbound_peak") return;
         injectMix(rd, "E", r, null);
       });
       res.hFwd.forEach((rd, r) => {
         if (oneWayPairs && r % 2 === 1) {
           injectMix(rd, "E", r, null);
-        } else if (r === 2 && revMode === "westbound_peak") {
-          injectMix(rd, "E", 2, null);
+        } else if (r === revRow && revMode === "westbound_peak") {
+          injectMix(rd, "E", revRow, null);
         }
       });
 
@@ -1018,27 +1050,29 @@ function stepSim(g, state, pSlow, turnProb, rng, pInject, opts) {
     }
   } else {
     res.hFwd.forEach((rd, r) => {
+      if (g.isTaipei && r === 7) return;
       if (oneWayPairs && r % 2 === 1) return;
-      if (r === 2 && revMode === "westbound_peak") return;
+      if (r === revRow && revMode === "westbound_peak") return;
       inject(rd, rng, null, pInj);
     });
     res.hBwd.forEach((rd, r) => {
+      if (g.isTaipei && r === 7) return;
       if (oneWayPairs && r % 2 === 0) {
         inject(rd, rng, null, pInj);
-      } else if (r === 2 && revMode === "eastbound_peak") {
+      } else if (r === revRow && revMode === "eastbound_peak") {
         inject(rd, rng, null, pInj);
       }
     });
 
     res.hBwd.forEach((rd, r) => {
       if (oneWayPairs && r % 2 === 0) return;
-      if (r === 2 && revMode === "eastbound_peak") return;
+      if (r === revRow && revMode === "eastbound_peak") return;
       inject(rd, rng, null, pInj);
     });
     res.hFwd.forEach((rd, r) => {
       if (oneWayPairs && r % 2 === 1) {
         inject(rd, rng, null, pInj);
-      } else if (r === 2 && revMode === "westbound_peak") {
+      } else if (r === revRow && revMode === "westbound_peak") {
         inject(rd, rng, null, pInj);
       }
     });
@@ -1148,9 +1182,10 @@ function drawState(canvas, g, state, trackedCarRef, revMode, oneWayPairs) {
 
   const { hFwd, hBwd, vFwd, vBwd, lights } = state;
   const C = CELL_PX;
+  const revRow = g.isTaipei ? 5 : 2;
 
-  const isHBwdReversed = (idx) => (idx === 2 && revMode === "eastbound_peak") || (oneWayPairs && idx % 2 === 0);
-  const isHFwdReversed = (idx) => (idx === 2 && revMode === "westbound_peak") || (oneWayPairs && idx % 2 === 1);
+  const isHBwdReversed = (idx) => (idx === revRow && revMode === "eastbound_peak") || (oneWayPairs && idx % 2 === 0);
+  const isHFwdReversed = (idx) => (idx === revRow && revMode === "westbound_peak") || (oneWayPairs && idx % 2 === 1);
 
   ctx.fillStyle = "#0e0e18";
   ctx.fillRect(0, 0, canvasW, canvasH);
@@ -1196,12 +1231,13 @@ function drawState(canvas, g, state, trackedCarRef, revMode, oneWayPairs) {
     const style = getRoadStyle(speed);
     if (oneWayPairs) {
       ctx.fillStyle = "rgba(30, 41, 59, 0.4)";
-    } else if (r === 2 && revMode !== "none") {
+    } else if (r === revRow && revMode !== "none") {
       ctx.fillStyle = "rgba(49, 46, 129, 0.4)";
     } else {
       ctx.fillStyle = style.bg;
     }
-    ctx.fillRect(PAD, hRoadY(g, r), g.HLEN * C, ROAD_W);
+    const startX = (g.isTaipei && r === 7) ? vRoadX(g, 3) : PAD;
+    ctx.fillRect(startX, hRoadY(g, r), (PAD + g.HLEN * C) - startX, ROAD_W);
   }
   for (let c = 0; c < NUM_V; c++) {
     const speed = g.vMaxSpeed ? g.vMaxSpeed[c] : 5;
@@ -1213,7 +1249,7 @@ function drawState(canvas, g, state, trackedCarRef, revMode, oneWayPairs) {
   for (let r = 0; r < NUM_H; r++) {
     const y = hRoadY(g, r) + C + LANE_GAP * 0.5;
     ctx.beginPath();
-    const isOneWay = oneWayPairs || (r === 2 && revMode !== "none");
+    const isOneWay = oneWayPairs || (r === revRow && revMode !== "none");
     if (isOneWay) {
       ctx.strokeStyle = "#eab308";
       ctx.lineWidth = 1.2;
@@ -1224,7 +1260,8 @@ function drawState(canvas, g, state, trackedCarRef, revMode, oneWayPairs) {
       ctx.lineWidth = 1;
       ctx.setLineDash([4, 4]);
     }
-    ctx.moveTo(PAD, y); ctx.lineTo(PAD + g.HLEN * C, y); ctx.stroke();
+    const startX = (g.isTaipei && r === 7) ? vRoadX(g, 3) : PAD;
+    ctx.moveTo(startX, y); ctx.lineTo(PAD + g.HLEN * C, y); ctx.stroke();
   }
   for (let c = 0; c < NUM_V; c++) {
     const x = vRoadX(g, c) + C + LANE_GAP * 0.5;
@@ -1247,6 +1284,9 @@ function drawState(canvas, g, state, trackedCarRef, revMode, oneWayPairs) {
   for (let r = 0; r < NUM_H; r++) {
     for (let c = 0; c < NUM_V; c++) {
       const ix = vRoadX(g, c), iy = hRoadY(g, r);
+      if (g.isTaipei && r === 7 && c < 3) {
+        continue; // Skip drawing non-existent intersections on Row 7
+      }
       if (g.tjunc && g.tjunc[r][c]) {
         ctx.fillStyle = "rgba(234,179,8,0.10)";
         ctx.fillRect(ix, iy, ROAD_W, ROAD_W);
@@ -1270,22 +1310,31 @@ function drawState(canvas, g, state, trackedCarRef, revMode, oneWayPairs) {
     ctx.font = "bold 9px sans-serif";
     
     const H_STREET_NAMES = [
-      "市民大道 (Civic Blvd)",
+      "民族東西路 (Minzu E/W Rd)",
+      "民權東西路 (Minquan E/W Rd)",
+      "民生東西路 (Minsheng E/W Rd)",
       "南京東西路 (Nanjing E/W Rd)",
+      "長安東西路 (Changan E/W Rd)",
+      "市民大道 (Civic Blvd)",
       "忠孝東西路 (Zhongxiao E/W Rd)",
       "信義路 / 仁愛路 (Xinyi/Ren'ai Rd)",
-      "羅斯福路 (Roosevelt Rd)"
+      "和平東西路 (Heping E/W Rd)"
     ];
     for (let r = 0; r < NUM_H; r++) {
       ctx.fillText(H_STREET_NAMES[r], PAD + 20, hRoadY(g, r) - 4);
     }
     
     const V_STREET_NAMES = [
-      "環河南路 (Huanhe S. Rd)",
-      "市府路 (Shifu Rd)",
+      "環河南北路 (Huanhe N/S Rd)",
+      "重慶南北路 (Chongqing N/S Rd)",
+      "承德路 (Chengde Rd)",
       "中山南北路 (Zhongshan N/S Rd)",
+      "林森南北路 (Linsen N/S Rd)",
       "新生南北路 (Xinsheng N/S Rd)",
+      "建國南北路 (Jianguo N/S Rd)",
+      "復興南北路 (Fuxing N/S Rd)",
       "敦化南北路 (Dunhua N/S Rd)",
+      "光復南北路 (Guangfu N/S Rd)",
       "基隆路 (Keelung Rd)"
     ];
     for (let c = 0; c < NUM_V; c++) {
