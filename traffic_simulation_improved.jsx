@@ -33,15 +33,21 @@ function hashString(str) {
 function mirror(pos, len) { return len - 1 - pos; }
 
 function buildGeometry(seed, jitterOn, missingOn) {
+  const isTaipei = seed === "Taipei";
   const rng = mulberry32((typeof seed === "string" ? hashString(seed) : seed) ^ 0x9e3779b9);
 
-  const seg = (n) => Array.from({ length: n }, () => {
-    if (!jitterOn) return SEG_LEN;
-    return Math.max(8, SEG_LEN + Math.round((rng() * 2 - 1) * SEG_JITTER));
-  });
-
-  const segH = seg(NUM_V + 1);
-  const segV = seg(NUM_H + 1);
+  let segH, segV;
+  if (isTaipei) {
+    segH = [10, 22, 22, 28, 44, 34, 10];
+    segV = [10, 35, 30, 30, 40, 10];
+  } else {
+    const seg = (n) => Array.from({ length: n }, () => {
+      if (!jitterOn) return SEG_LEN;
+      return Math.max(8, SEG_LEN + Math.round((rng() * 2 - 1) * SEG_JITTER));
+    });
+    segH = seg(NUM_V + 1);
+    segV = seg(NUM_H + 1);
+  }
 
   const hInt = [];
   { let p = segH[0]; for (let c = 0; c < NUM_V; c++) { hInt.push(p); p += 1 + segH[c + 1]; } }
@@ -58,7 +64,14 @@ function buildGeometry(seed, jitterOn, missingOn) {
 
   const vBarrier = Array.from({ length: NUM_V }, () => new Set());
 
-  if (missingOn) {
+  if (isTaipei) {
+    tjunc[1][1] = "up";
+    tjunc[1][4] = "up";
+    for (let y = 0; y < vInt[1]; y++) {
+      vBarrier[1].add(y);
+      vBarrier[4].add(y);
+    }
+  } else if (missingOn) {
     for (let r = 0; r < NUM_H; r++) {
       for (let c = 0; c < NUM_V; c++) {
         if (rng() < 0.18) {
@@ -78,7 +91,10 @@ function buildGeometry(seed, jitterOn, missingOn) {
     }
   }
 
-  return { segH, segV, hInt, vInt, HLEN, VLEN, present, tjunc, vBarrier };
+  const hMaxSpeed = isTaipei ? [5, 4, 4, 3, 4] : new Array(NUM_H).fill(5);
+  const vMaxSpeed = isTaipei ? [5, 4, 4, 3, 4, 5] : new Array(NUM_V).fill(5);
+
+  return { segH, segV, hInt, vInt, HLEN, VLEN, present, tjunc, vBarrier, isTaipei, hMaxSpeed, vMaxSpeed };
 }
 
 function canvasSize(g) {
@@ -287,6 +303,177 @@ function bfsPathAvoid(adj, start, goal, avoidFirst) {
   return null; 
 }
 
+function getEdgeWeight(g, u, w, state, dynamicRouting) {
+  const r1 = NK_R(u), c1 = NK_C(u), r2 = NK_R(w), c2 = NK_C(w);
+  let baseDist = 1;
+  let speed = 5;
+  let roadSegment = null;
+  
+  if (r1 === r2) {
+    baseDist = g.segH[Math.min(c1, c2) + 1];
+    speed = g.hMaxSpeed ? g.hMaxSpeed[r1] : 5;
+    if (state) {
+      roadSegment = c2 > c1 ? state.hFwd[r1] : state.hBwd[r1];
+    }
+  } else {
+    baseDist = g.segV[Math.min(r1, r2) + 1];
+    speed = g.vMaxSpeed ? g.vMaxSpeed[c1] : 5;
+    if (state) {
+      roadSegment = r2 > r1 ? state.vFwd[c1] : state.vBwd[c1];
+    }
+  }
+
+  const baseCost = baseDist / speed;
+
+  if (!dynamicRouting || !state || !roadSegment) {
+    return baseCost;
+  }
+
+  const cellStart = r1 === r2 ? Math.min(g.hInt[c1], g.hInt[c2]) : Math.min(g.vInt[r1], g.vInt[r2]);
+  const cellEnd = r1 === r2 ? Math.max(g.hInt[c1], g.hInt[c2]) : Math.max(g.vInt[r1], g.vInt[r2]);
+  
+  let carCount = 0;
+  for (let i = cellStart + 1; i < cellEnd; i++) {
+    if (roadSegment[i] !== null) {
+      carCount++;
+    }
+  }
+  const segmentLength = cellEnd - cellStart - 1;
+  const density = segmentLength > 0 ? carCount / segmentLength : 0;
+  
+  return baseCost * (1 + 9 * density * density);
+}
+
+function aStarPath(g, adj, start, goal, state, dynamicRouting) {
+  if (start === goal) return [start];
+  
+  const openSet = [start];
+  const cameFrom = new Map();
+  
+  const gScore = new Array(adj.length).fill(Infinity);
+  const fScore = new Array(adj.length).fill(Infinity);
+  
+  gScore[start] = 0;
+  
+  const c_goal = NK_C(goal), r_goal = NK_R(goal);
+  const heuristic = (node) => {
+    const c = NK_C(node), r = NK_R(node);
+    const dist = Math.abs(g.hInt[c] - g.hInt[c_goal]) + Math.abs(g.vInt[r] - g.vInt[r_goal]);
+    return dist / 5;
+  };
+  
+  fScore[start] = heuristic(start);
+  
+  while (openSet.length > 0) {
+    let current = openSet[0];
+    let currentIndex = 0;
+    for (let i = 1; i < openSet.length; i++) {
+      if (fScore[openSet[i]] < fScore[current]) {
+        current = openSet[i];
+        currentIndex = i;
+      }
+    }
+    
+    if (current === goal) {
+      const path = [current];
+      while (cameFrom.has(current)) {
+        current = cameFrom.get(current);
+        path.push(current);
+      }
+      return path.reverse();
+    }
+    
+    openSet.splice(currentIndex, 1);
+    
+    for (const neighbor of adj[current]) {
+      const weight = getEdgeWeight(g, current, neighbor, state, dynamicRouting);
+      const tentativeGScore = gScore[current] + weight;
+      
+      if (tentativeGScore < gScore[neighbor]) {
+        cameFrom.set(neighbor, current);
+        gScore[neighbor] = tentativeGScore;
+        fScore[neighbor] = tentativeGScore + heuristic(neighbor);
+        
+        if (!openSet.includes(neighbor)) {
+          openSet.push(neighbor);
+        }
+      }
+    }
+  }
+  
+  return null;
+}
+
+function aStarPathAvoid(g, adj, start, goal, avoidNode, state, dynamicRouting) {
+  if (start === goal) return [start];
+  
+  const openSet = [];
+  const cameFrom = new Map();
+  
+  const gScore = new Array(adj.length).fill(Infinity);
+  const fScore = new Array(adj.length).fill(Infinity);
+  
+  gScore[start] = 0;
+  
+  const c_goal = NK_C(goal), r_goal = NK_R(goal);
+  const heuristic = (node) => {
+    const c = NK_C(node), r = NK_R(node);
+    const dist = Math.abs(g.hInt[c] - g.hInt[c_goal]) + Math.abs(g.vInt[r] - g.vInt[r_goal]);
+    return dist / 5;
+  };
+  
+  fScore[start] = heuristic(start);
+  
+  for (const neighbor of adj[start]) {
+    if (neighbor === avoidNode) continue;
+    const weight = getEdgeWeight(g, start, neighbor, state, dynamicRouting);
+    gScore[neighbor] = weight;
+    fScore[neighbor] = weight + heuristic(neighbor);
+    cameFrom.set(neighbor, start);
+    openSet.push(neighbor);
+  }
+  
+  while (openSet.length > 0) {
+    let current = openSet[0];
+    let currentIndex = 0;
+    for (let i = 1; i < openSet.length; i++) {
+      if (fScore[openSet[i]] < fScore[current]) {
+        current = openSet[i];
+        currentIndex = i;
+      }
+    }
+    
+    if (current === goal) {
+      const path = [current];
+      while (cameFrom.has(current)) {
+        current = cameFrom.get(current);
+        path.push(current);
+      }
+      return path.reverse();
+    }
+    
+    openSet.splice(currentIndex, 1);
+    
+    for (const neighbor of adj[current]) {
+      const weight = getEdgeWeight(g, current, neighbor, state, dynamicRouting);
+      const tentativeGScore = gScore[current] + weight;
+      
+      if (tentativeGScore < gScore[neighbor]) {
+        cameFrom.set(neighbor, current);
+        gScore[neighbor] = tentativeGScore;
+        fScore[neighbor] = tentativeGScore + heuristic(neighbor);
+        
+        if (!openSet.includes(neighbor)) {
+          openSet.push(neighbor);
+        }
+      }
+    }
+  }
+  
+  return null;
+}
+
+
 function headingBetween(a, b) {
   const r1 = NK_R(a), c1 = NK_C(a), r2 = NK_R(b), c2 = NK_C(b);
   if (c2 === c1 + 1) return "E";
@@ -370,13 +557,13 @@ function nodeAtCell(g, heading, laneIdx, cell) {
   return null;
 }
 
-function naschStep(road, blockedSet, crossSet, pSlow, rng, counter, key, onExit) {
+function naschStep(road, blockedSet, crossSet, pSlow, rng, counter, key, onExit, maxSpeed) {
   const n = road.length;
   const next = new Array(n).fill(null);
   for (let i = 0; i < n; i++) {
     const car = road[i];
     if (!car) continue;
-    let v = Math.min(car.v + 1, V_MAX);
+    let v = Math.min(car.v + 1, maxSpeed || V_MAX);
     const cap = (car.stopCell != null && isFinite(car.stopCell)) ? Math.max(0, car.stopCell - i) : Infinity;
     let limit = Math.min(v, cap);
     let gap = limit;
@@ -402,7 +589,7 @@ function inject(road, rng, wall, pInject) {
     road[0] = { v: Math.floor(rng() * 3) + 1 };
 }
 
-function injectRouted(g, adj, road, rng, wall, pInject, tick, boundary, laneIdx, idRef) {
+function injectRouted(g, adj, road, rng, wall, pInject, tick, boundary, laneIdx, idRef, routingStrategy, state) {
   if (wall && (wall.has(0) || wall.has(1))) return null;
   if (road[0] !== null || road[1] !== null || rng() >= pInject) return null;
   if (!entrySegmentClear(g, boundary, laneIdx)) return null; 
@@ -412,7 +599,14 @@ function injectRouted(g, adj, road, rng, wall, pInject, tick, boundary, laneIdx,
   for (let tries = 0; tries < 8 && exits.length; tries++) {
     const [eb, el] = exits[Math.floor(rng() * exits.length)];
     const { node: goal, heading: exitHeading } = exitInfo(eb, el);
-    const path = bfsPath(adj, start, goal);
+    let path;
+    if (routingStrategy === "astar_static") {
+      path = aStarPath(g, adj, start, goal, state, false);
+    } else if (routingStrategy === "astar_dynamic") {
+      path = aStarPath(g, adj, start, goal, state, true);
+    } else {
+      path = bfsPath(adj, start, goal);
+    }
     if (!path) continue;
     const plan = derivePlan(path, exitHeading);
     const car = {
@@ -550,7 +744,7 @@ function processTurns(g, state, turnProb, rng, revMode, oneWayPairs) {
   }
 }
 
-function processRoutes(g, state, rng, revMode, oneWayPairs) {
+function processRoutes(g, state, rng, revMode, oneWayPairs, routingStrategy) {
   const { hFwd, hBwd, vFwd, vBwd, lights } = state;
   const adj = state.adj || buildGraph(g, revMode, oneWayPairs);
   const wallOf = new WeakMap();
@@ -608,7 +802,14 @@ function processRoutes(g, state, rng, revMode, oneWayPairs) {
       const r = NK_R(nk), c = NK_C(nk);
       let out = car.plan[nk];
       if (out == null) { 
-        const path = bfsPath(adj, nk, car.target);
+        let path;
+        if (routingStrategy === "astar_static") {
+          path = aStarPath(g, adj, nk, car.target, state, false);
+        } else if (routingStrategy === "astar_dynamic") {
+          path = aStarPath(g, adj, nk, car.target, state, true);
+        } else {
+          path = bfsPath(adj, nk, car.target);
+        }
         if (path) { car.plan = derivePlan(path, car.exitHeading); out = car.plan[nk]; car.path = path; }
       }
       if (out == null || out === heading) { car.wait = 0; continue; } 
@@ -653,7 +854,14 @@ function processRoutes(g, state, rng, revMode, oneWayPairs) {
       if (car.wait >= PATIENCE) {
         const blockedNext = stepNode(nk, out);
         let adopted = false;
-        const alt = bfsPathAvoid(adj, nk, car.target, blockedNext);
+        let alt;
+        if (routingStrategy === "astar_static") {
+          alt = aStarPathAvoid(g, adj, nk, car.target, blockedNext, state, false);
+        } else if (routingStrategy === "astar_dynamic") {
+          alt = aStarPathAvoid(g, adj, nk, car.target, blockedNext, state, true);
+        } else {
+          alt = bfsPathAvoid(adj, nk, car.target, blockedNext);
+        }
         if (alt && alt.length > 1) {
           const newPlan = derivePlan(alt, car.exitHeading);
           const newOut = newPlan[nk];
@@ -666,7 +874,14 @@ function processRoutes(g, state, rng, revMode, oneWayPairs) {
           for (const [eb, el] of state.validExits) {
             const { node: goal, heading: eh } = exitInfo(eb, el);
             if (goal === car.target) continue;
-            const p2 = bfsPathAvoid(adj, nk, goal, blockedNext);
+            let p2;
+            if (routingStrategy === "astar_static") {
+              p2 = aStarPathAvoid(g, adj, nk, goal, blockedNext, state, false);
+            } else if (routingStrategy === "astar_dynamic") {
+              p2 = aStarPathAvoid(g, adj, nk, goal, blockedNext, state, true);
+            } else {
+              p2 = bfsPathAvoid(adj, nk, goal, blockedNext);
+            }
             if (p2 && p2.length > 1) {
               const np = derivePlan(p2, eh), no = np[nk];
               if (no && no !== out) {
@@ -693,6 +908,7 @@ function stepSim(g, state, pSlow, turnProb, rng, pInject, opts) {
   const adj = opts && opts.adj;
   const idRef = (opts && opts.idRef) || { n: 0 };
   const compRate = (opts && opts.complianceRate != null) ? opts.complianceRate : 0.70;
+  const routingStrategy = (opts && opts.routingStrategy) || "bfs";
 
   const isHBwdReversed = (idx) => (idx === 2 && revMode === "eastbound_peak") || (oneWayPairs && idx % 2 === 0);
   const isHFwdReversed = (idx) => (idx === 2 && revMode === "westbound_peak") || (oneWayPairs && idx % 2 === 1);
@@ -731,10 +947,10 @@ function stepSim(g, state, pSlow, turnProb, rng, pInject, opts) {
     const s = new Set(); if (g.vBarrier) for (const y of g.vBarrier[c]) s.add(mirror(y, g.VLEN)); return s;
   });
   const res = {
-    hFwd: state.hFwd.map((rd, r) => naschStep(rd, blk(true, !isHFwdReversed(r), r), isHFwdReversed(r) ? crossH_b : crossH_f, pSlow, rng, counter, "hF", onExit)),
-    hBwd: state.hBwd.map((rd, r) => naschStep(rd, blk(true, isHBwdReversed(r), r), isHBwdReversed(r) ? crossH_f : crossH_b, pSlow, rng, counter, "hB", onExit)),
-    vFwd: state.vFwd.map((rd, c) => naschStep(rd, blk(false, true, c), crossV_f, pSlow, rng, counter, "vF", onExit)),
-    vBwd: state.vBwd.map((rd, c) => naschStep(rd, blk(false, false, c), crossV_b, pSlow, rng, counter, "vB", onExit)),
+    hFwd: state.hFwd.map((rd, r) => naschStep(rd, blk(true, !isHFwdReversed(r), r), isHFwdReversed(r) ? crossH_b : crossH_f, pSlow, rng, counter, "hF", onExit, g.hMaxSpeed ? g.hMaxSpeed[r] : V_MAX)),
+    hBwd: state.hBwd.map((rd, r) => naschStep(rd, blk(true, isHBwdReversed(r), r), isHBwdReversed(r) ? crossH_f : crossH_b, pSlow, rng, counter, "hB", onExit, g.hMaxSpeed ? g.hMaxSpeed[r] : V_MAX)),
+    vFwd: state.vFwd.map((rd, c) => naschStep(rd, blk(false, true, c), crossV_f, pSlow, rng, counter, "vF", onExit, g.vMaxSpeed ? g.vMaxSpeed[c] : V_MAX)),
+    vBwd: state.vBwd.map((rd, c) => naschStep(rd, blk(false, false, c), crossV_b, pSlow, rng, counter, "vB", onExit, g.vMaxSpeed ? g.vMaxSpeed[c] : V_MAX)),
     lights: nl,
     crossings: state.crossings + counter.hF + counter.hB + counter.vF + counter.vB,
     lastCrossings: counter.hF + counter.hB + counter.vF + counter.vB,
@@ -749,7 +965,7 @@ function stepSim(g, state, pSlow, turnProb, rng, pInject, opts) {
   };
 
   clearIntersections(g, res, rng, revMode, oneWayPairs);
-  processRoutes(g, res, rng, revMode, oneWayPairs);
+  processRoutes(g, res, rng, revMode, oneWayPairs, routingStrategy);
   processTurns(g, res, turnProb, rng, revMode, oneWayPairs);
 
   const pInj = pInject == null ? INJECT_P : pInject;
@@ -765,7 +981,7 @@ function stepSim(g, state, pSlow, turnProb, rng, pInject, opts) {
         if (wall && (wall.has(0) || wall.has(1))) return;
         if (rd[0] !== null || rd[1] !== null || rng() >= meterP) return;
         if (rng() < compRate) {
-          injectRouted(g, adj, rd, rng, wall, 1.0, tick, boundary, laneIdx, idRef);
+          injectRouted(g, adj, rd, rng, wall, 1.0, tick, boundary, laneIdx, idRef, routingStrategy, res);
         } else {
           inject(rd, rng, wall, 1.0);
         }
@@ -851,7 +1067,7 @@ function densityToInjectRouted(density) {
   return 0.015 + t * 0.05;   
 }
 
-function runExperiment(seed, mode, { density, pSlow, turnP, waveSpeed, jitterOn, missingOn, ticks, warmup, routed, complianceRate, reversibleMode, oneWayPairs }) {
+function runExperiment(seed, mode, { density, pSlow, turnP, waveSpeed, jitterOn, missingOn, ticks, warmup, routed, complianceRate, reversibleMode, oneWayPairs, routingStrategy }) {
   const g = buildGeometry(seed, jitterOn, missingOn);
   const rng = mulberry32((typeof seed === "string" ? hashString(seed) : seed) ^ hashString(mode));
   const pInject = routed ? densityToInjectRouted(density) : densityToInject(density);
@@ -872,7 +1088,8 @@ function runExperiment(seed, mode, { density, pSlow, turnP, waveSpeed, jitterOn,
       countFrom: warmup,
       complianceRate: complianceRate / 100,
       reversibleMode,
-      oneWayPairs
+      oneWayPairs,
+      routingStrategy: routingStrategy || "bfs"
     });
     if (t === warmup) spawnAtWarmup = idRef.n; 
     if (t >= warmup) {
@@ -938,42 +1155,85 @@ function drawState(canvas, g, state, trackedCarRef, revMode, oneWayPairs) {
   ctx.fillStyle = "#0e0e18";
   ctx.fillRect(0, 0, canvasW, canvasH);
 
-  // Fill road background
+  const getRoadStyle = (speed) => {
+    if (speed === 5) return { bg: "rgba(234, 88, 12, 0.22)", border: "#f97316" };
+    if (speed === 4) return { bg: "rgba(202, 138, 4, 0.22)", border: "#eab308" };
+    return { bg: "rgba(51, 65, 85, 0.25)", border: "#475569" };
+  };
+
+  if (g.isTaipei) {
+    ctx.save();
+    ctx.strokeStyle = "rgba(14, 165, 233, 0.18)";
+    ctx.lineWidth = 18;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    
+    ctx.beginPath();
+    ctx.moveTo(10, 0);
+    ctx.lineTo(10, canvasH);
+    ctx.stroke();
+    
+    ctx.beginPath();
+    ctx.moveTo(10, 15);
+    ctx.bezierCurveTo(canvasW / 3, 5, 2 * canvasW / 3, 25, canvasW, 15);
+    ctx.stroke();
+    
+    ctx.beginPath();
+    ctx.moveTo(10, canvasH - 15);
+    ctx.bezierCurveTo(canvasW / 3, canvasH - 5, 2 * canvasW / 3, canvasH - 25, canvasW, canvasH - 15);
+    ctx.stroke();
+    
+    ctx.fillStyle = "#0ea5e9";
+    ctx.font = "italic bold 9px sans-serif";
+    ctx.fillText("淡 水 河 (Tamsui River)", 18, canvasH / 2);
+    ctx.fillText("基 隆 河 (Keelung River)", canvasW / 2 - 55, 28);
+    ctx.fillText("新 店 溪 (Xindian River)", canvasW / 2 - 55, canvasH - 26);
+    ctx.restore();
+  }
+
   for (let r = 0; r < NUM_H; r++) {
+    const speed = g.hMaxSpeed ? g.hMaxSpeed[r] : 5;
+    const style = getRoadStyle(speed);
     if (oneWayPairs) {
-      ctx.fillStyle = "#151a35"; // Soft blue-ish highlight for all one-way pairs
+      ctx.fillStyle = "rgba(30, 41, 59, 0.4)";
     } else if (r === 2 && revMode !== "none") {
-      ctx.fillStyle = "#1e1530"; // Tidal road highlight
+      ctx.fillStyle = "rgba(49, 46, 129, 0.4)";
     } else {
-      ctx.fillStyle = "#1a1a2c";
+      ctx.fillStyle = style.bg;
     }
     ctx.fillRect(PAD, hRoadY(g, r), g.HLEN * C, ROAD_W);
   }
-  ctx.fillStyle = "#1a1a2c";
-  for (let c = 0; c < NUM_V; c++) ctx.fillRect(vRoadX(g, c), PAD, ROAD_W, g.VLEN * C);
+  for (let c = 0; c < NUM_V; c++) {
+    const speed = g.vMaxSpeed ? g.vMaxSpeed[c] : 5;
+    const style = getRoadStyle(speed);
+    ctx.fillStyle = style.bg;
+    ctx.fillRect(vRoadX(g, c), PAD, ROAD_W, g.VLEN * C);
+  }
 
-  // Road dividers
   for (let r = 0; r < NUM_H; r++) {
     const y = hRoadY(g, r) + C + LANE_GAP * 0.5;
     ctx.beginPath();
     const isOneWay = oneWayPairs || (r === 2 && revMode !== "none");
     if (isOneWay) {
-      ctx.strokeStyle = "#eab308"; // Reversible yellow line
+      ctx.strokeStyle = "#eab308";
       ctx.lineWidth = 1.2;
       ctx.setLineDash([6, 4]);
     } else {
-      ctx.strokeStyle = "#252540";
+      const speed = g.hMaxSpeed ? g.hMaxSpeed[r] : 5;
+      ctx.strokeStyle = speed === 5 ? "rgba(249, 115, 22, 0.35)" : (speed === 4 ? "rgba(234, 179, 8, 0.35)" : "#252540");
       ctx.lineWidth = 1;
       ctx.setLineDash([4, 4]);
     }
     ctx.moveTo(PAD, y); ctx.lineTo(PAD + g.HLEN * C, y); ctx.stroke();
   }
-  ctx.strokeStyle = "#252540";
-  ctx.lineWidth = 1;
-  ctx.setLineDash([4, 4]);
   for (let c = 0; c < NUM_V; c++) {
     const x = vRoadX(g, c) + C + LANE_GAP * 0.5;
-    ctx.beginPath(); ctx.moveTo(x, PAD); ctx.lineTo(x, PAD + g.VLEN * C); ctx.stroke();
+    ctx.beginPath();
+    const speed = g.vMaxSpeed ? g.vMaxSpeed[c] : 5;
+    ctx.strokeStyle = speed === 5 ? "rgba(249, 115, 22, 0.35)" : (speed === 4 ? "rgba(234, 179, 8, 0.35)" : "#252540");
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    ctx.moveTo(x, PAD); ctx.lineTo(x, PAD + g.VLEN * C); ctx.stroke();
   }
   ctx.setLineDash([]);
 
@@ -1002,6 +1262,42 @@ function drawState(canvas, g, state, trackedCarRef, revMode, oneWayPairs) {
       ctx.fillRect(ix, iy, ROAD_W, ROAD_W);
       drawCross(ctx, ix, iy, ROAD_W);
     }
+  }
+
+  if (g.isTaipei) {
+    ctx.save();
+    ctx.fillStyle = "rgba(148, 163, 184, 0.6)";
+    ctx.font = "bold 9px sans-serif";
+    
+    const H_STREET_NAMES = [
+      "市民大道 (Civic Blvd)",
+      "南京東西路 (Nanjing E/W Rd)",
+      "忠孝東西路 (Zhongxiao E/W Rd)",
+      "信義路 / 仁愛路 (Xinyi/Ren'ai Rd)",
+      "羅斯福路 (Roosevelt Rd)"
+    ];
+    for (let r = 0; r < NUM_H; r++) {
+      ctx.fillText(H_STREET_NAMES[r], PAD + 20, hRoadY(g, r) - 4);
+    }
+    
+    const V_STREET_NAMES = [
+      "環河南路 (Huanhe S. Rd)",
+      "市府路 (Shifu Rd)",
+      "中山南北路 (Zhongshan N/S Rd)",
+      "新生南北路 (Xinsheng N/S Rd)",
+      "敦化南北路 (Dunhua N/S Rd)",
+      "基隆路 (Keelung Rd)"
+    ];
+    for (let c = 0; c < NUM_V; c++) {
+      const x = vRoadX(g, c) - 4;
+      const y = PAD + 90;
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(-Math.PI / 2);
+      ctx.fillText(V_STREET_NAMES[c], 0, 0);
+      ctx.restore();
+    }
+    ctx.restore();
   }
 
   let count = 0, totalV = 0;
@@ -1145,6 +1441,7 @@ export default function TrafficSim() {
   const [complianceRate, setComplianceRate] = useState(70);
   const [reversibleMode, setReversibleMode] = useState("none");
   const [oneWayPairs, setOneWayPairs] = useState(false);
+  const [routingStrategy, setRoutingStrategy] = useState("bfs");
   const [stats, setStats] = useState({ carCount: 0, avgSpeed: "0" });
   const dirEmaRef = useRef({ hF: 0, hB: 0, vF: 0, vB: 0 });
   const [dirTput, setDirTput] = useState({ hF: 0, hB: 0, vF: 0, vB: 0 });
@@ -1158,6 +1455,8 @@ export default function TrafficSim() {
   const [expTicks, setExpTicks] = useState(600);
   const [expModeA, setExpModeA] = useState("all_sync");
   const [expModeB, setExpModeB] = useState("green_wave_h");
+  const [expRoutingA, setExpRoutingA] = useState("bfs");
+  const [expRoutingB, setExpRoutingB] = useState("astar_dynamic");
   const [expResults, setExpResults] = useState(null);
   const [expRunning, setExpRunning] = useState(false);
 
@@ -1193,7 +1492,8 @@ export default function TrafficSim() {
       idRef: idRef.current,
       complianceRate: complianceRate / 100,
       reversibleMode,
-      oneWayPairs
+      oneWayPairs,
+      routingStrategy
     });
     const s = simRef.current;
     const a = 0.1, d = s.lastDir, e = dirEmaRef.current;
@@ -1211,7 +1511,7 @@ export default function TrafficSim() {
     }
     setTick(t => t + 1);
     redraw();
-  }, [pSlow, turnP, density, routed, redraw, signalMode, complianceRate, reversibleMode, oneWayPairs]);
+  }, [pSlow, turnP, density, routed, redraw, signalMode, complianceRate, reversibleMode, oneWayPairs, routingStrategy]);
 
   useEffect(() => {
     if (!running) { if (ivRef.current) clearInterval(ivRef.current); return; }
@@ -1223,21 +1523,28 @@ export default function TrafficSim() {
     setExpRunning(true);
     setRunning(false);
     setTimeout(() => {
-      const opts = { density, pSlow, turnP, waveSpeed, jitterOn, missingOn, routed, complianceRate, reversibleMode, oneWayPairs,
-                     ticks: expTicks, warmup: Math.floor(expTicks * 0.2) };
-      const a = runExperiment(seed, expModeA, opts);
-      const b = runExperiment(seed, expModeB, opts);
-      setExpResults({ a, b, opts });
+      const optsA = { density, pSlow, turnP, waveSpeed, jitterOn, missingOn, routed, complianceRate, reversibleMode, oneWayPairs,
+                     routingStrategy: expRoutingA, ticks: expTicks, warmup: Math.floor(expTicks * 0.2) };
+      const optsB = { density, pSlow, turnP, waveSpeed, jitterOn, missingOn, routed, complianceRate, reversibleMode, oneWayPairs,
+                     routingStrategy: expRoutingB, ticks: expTicks, warmup: Math.floor(expTicks * 0.2) };
+      const a = runExperiment(seed, expModeA, optsA);
+      const b = runExperiment(seed, expModeB, optsB);
+      setExpResults({ a, b, optsA, optsB });
       setExpRunning(false);
     }, 30);
-  }, [seed, expModeA, expModeB, density, pSlow, turnP, waveSpeed, jitterOn, missingOn, routed, complianceRate, reversibleMode, oneWayPairs, expTicks]);
+  }, [seed, expModeA, expModeB, density, pSlow, turnP, waveSpeed, jitterOn, missingOn, routed, complianceRate, reversibleMode, oneWayPairs, expTicks, expRoutingA, expRoutingB]);
 
   const exportCSV = () => {
     if (!expResults) return;
-    const { a, b, opts } = expResults;
+    const { a, b, optsA, optsB } = expResults;
     const headers = [
       "Condition",
+      "Road Network",
+      "Routing Strategy",
       "Signal Mode",
+      "Compliance Rate",
+      "Reversible Mode",
+      "One-Way Pairs",
       "Total Throughput (crossings/tick)",
       "L-R Throughput",
       "R-L Throughput",
@@ -1253,8 +1560,13 @@ export default function TrafficSim() {
     
     const rows = [
       [
-        "Baseline",
+        "Version A (Baseline)",
+        optsA.seed === "Taipei" ? "Taipei Core Grid" : "Default Grid",
+        optsA.routingStrategy.toUpperCase(),
         labelFor(a.mode),
+        (optsA.complianceRate * 100).toFixed(0) + "%",
+        optsA.reversibleMode,
+        optsA.oneWayPairs ? "Yes" : "No",
         a.throughput.toFixed(4),
         a.tputHF.toFixed(4),
         a.tputHB.toFixed(4),
@@ -1266,8 +1578,13 @@ export default function TrafficSim() {
         (a.completion * 100).toFixed(2) + "%"
       ],
       [
-        "Treatment",
+        "Version B (Treatment)",
+        optsB.seed === "Taipei" ? "Taipei Core Grid" : "Default Grid",
+        optsB.routingStrategy.toUpperCase(),
         labelFor(b.mode),
+        (optsB.complianceRate * 100).toFixed(0) + "%",
+        optsB.reversibleMode,
+        optsB.oneWayPairs ? "Yes" : "No",
         b.throughput.toFixed(4),
         b.tputHF.toFixed(4),
         b.tputHB.toFixed(4),
@@ -1383,20 +1700,22 @@ export default function TrafficSim() {
           setSignalMode("alternating");
           setReversibleMode("none");
           setOneWayPairs(false);
-        }} style={btn}>Default Grid</button>
+          setRoutingStrategy("bfs");
+        }} style={seed !== "Taipei" ? btnActive : btn}>Default Grid</button>
         
         <button onClick={() => {
           setSeed("Taipei");
-          setJitterOn(true);
-          setMissingOn(true);
+          setJitterOn(false);
+          setMissingOn(false);
           setRouted(true);
           setComplianceRate(80);
           setDensity(0.15);
           setPSlow(0.40);
           setSignalMode("adaptive");
           setReversibleMode("none");
-          setOneWayPairs(true); // Automatically enable one-way pairs for Taipei Xinyi-like preset!
-        }} style={btnActive}>Taipei Xinyi-like</button>
+          setOneWayPairs(true);
+          setRoutingStrategy("astar_dynamic");
+        }} style={seed === "Taipei" ? btnActive : btn}>Taipei Core Grid</button>
       </div>
 
       <div style={{ display: "flex", gap: "4px", flexWrap: "wrap", justifyContent: "center" }}>
@@ -1424,8 +1743,19 @@ export default function TrafficSim() {
           {missingOn ? "✓ " : ""}missing intersections (3-way)
         </button>
         <button onClick={() => setRouted(v => !v)} style={routed ? { ...toggleOn, background: "#3b1d5e", color: "#e9d5ff", border: "1px solid #a855f7" } : btn}>
-          {routed ? "✓ " : ""}routed (O/D + shortest path)
+          {routed ? "✓ " : ""}routed (O/D + path planning)
         </button>
+        {routed && (
+          <div style={{ display: "flex", alignItems: "center", gap: "4px", background: "#1b1b2f", padding: "2px 8px", borderRadius: "4px", border: "1px solid #3b1d5e" }}>
+            <span style={{ fontSize: "11px", color: "#a855f7", fontWeight: "bold" }}>Strategy:</span>
+            <select value={routingStrategy} onChange={(e) => setRoutingStrategy(e.target.value)}
+              style={{ background: "#0e0e18", color: "#e9d5ff", border: "1px solid #3b1d5e", borderRadius: "3px", fontSize: "11px", padding: "2px 4px", outline: "none", cursor: "pointer" }}>
+              <option value="bfs">BFS (Static Hops)</option>
+              <option value="astar_static">A* (Static Time)</option>
+              <option value="astar_dynamic">A* (Dynamic Congestion)</option>
+            </select>
+          </div>
+        )}
         <span style={{ fontSize: "10px", color: "#484860" }}>← seed-driven, change seed to reshuffle</span>
       </div>
 
@@ -1501,6 +1831,30 @@ export default function TrafficSim() {
             </button>
           )}
         </div>
+
+        {routed && (
+          <div style={{ display: "flex", gap: "12px", flexWrap: "wrap", alignItems: "center", fontSize: "11px", color: "#606078", marginTop: "8px", borderTop: "1px dashed #20203a", paddingTop: "8px" }}>
+            <label style={{ display: "flex", gap: "4px", alignItems: "center" }}>
+              baseline routing
+              <select value={expRoutingA} onChange={(e) => setExpRoutingA(e.target.value)}
+                style={{ background: "#151522", color: "#a8a8c0", border: "1px solid #30304a", borderRadius: "3px", padding: "3px", fontFamily: "inherit", fontSize: "11px" }}>
+                <option value="bfs">BFS (Static Hops)</option>
+                <option value="astar_static">A* (Static Time)</option>
+                <option value="astar_dynamic">A* (Dynamic Congestion)</option>
+              </select>
+            </label>
+            <span style={{ color: "#484860" }}>|</span>
+            <label style={{ display: "flex", gap: "4px", alignItems: "center" }}>
+              treatment routing
+              <select value={expRoutingB} onChange={(e) => setExpRoutingB(e.target.value)}
+                style={{ background: "#151522", color: "#a8a8c0", border: "1px solid #30304a", borderRadius: "3px", padding: "3px", fontFamily: "inherit", fontSize: "11px" }}>
+                <option value="bfs">BFS (Static Hops)</option>
+                <option value="astar_static">A* (Static Time)</option>
+                <option value="astar_dynamic">A* (Dynamic Congestion)</option>
+              </select>
+            </label>
+          </div>
+        )}
 
         {expResults && (
           <div style={{ marginTop: "12px" }}>
