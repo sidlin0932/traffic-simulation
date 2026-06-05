@@ -339,13 +339,12 @@ export default function TrafficSimSpec() {
         ctx.strokeStyle = "#ffffff";
         ctx.lineWidth = 0.8;
         ctx.setLineDash([]);
-        g.hInt.forEach(cell => {
-          const c = g.hInt.indexOf(cell);
-          if (!g.present[r][c]) return;
-          const start = PAD + Math.max(0, cell - 6) * C;
-          const end = PAD + cell * C;
-          ctx.beginPath(); ctx.moveTo(start, yL); ctx.lineTo(end, yL); ctx.stroke();
-        });
+        for (let c = 0; c < g.NUM_V; c++) {
+          if (!g.present[r][c]) continue;
+          const stopX = vRoadX(c);
+          const startX = Math.max(PAD, stopX - 6 * C);
+          ctx.beginPath(); ctx.moveTo(startX, yL); ctx.lineTo(stopX, yL); ctx.stroke();
+        }
       }
       // hBwd lane dividers
       for (let l = 1; l < bwdCount; l++) {
@@ -355,37 +354,34 @@ export default function TrafficSimSpec() {
         ctx.strokeStyle = "#ffffff";
         ctx.lineWidth = 0.8;
         ctx.setLineDash([]);
-        g.hInt.forEach(cell => {
-          const c = g.hInt.indexOf(cell);
-          if (!g.present[r][c]) return;
-          const start = PAD + (cell + 1) * C;
-          const end = PAD + Math.min(g.HLEN, cell + 7) * C;
-          ctx.beginPath(); ctx.moveTo(start, yL); ctx.lineTo(end, yL); ctx.stroke();
-        });
+        for (let c = 0; c < g.NUM_V; c++) {
+          if (!g.present[r][c]) continue;
+          const stopX = vRoadX(c) + ROAD_W;
+          const endX = Math.min(PAD + g.HLEN * C, stopX + 6 * C);
+          ctx.beginPath(); ctx.moveTo(stopX, yL); ctx.lineTo(endX, yL); ctx.stroke();
+        }
       }
 
       // 3. Draw Stop Lines (白實線)
       ctx.strokeStyle = "#ffffff";
       ctx.lineWidth = 1.5;
       ctx.setLineDash([]);
-      g.hInt.forEach(cell => {
-        const c = g.hInt.indexOf(cell);
-        if (!g.present[r][c]) return;
-        // hFwd stop line
-        const xFwd = PAD + cell * C;
+      for (let c = 0; c < g.NUM_V; c++) {
+        if (!g.present[r][c]) continue;
+        // hFwd stop line (left edge of intersection)
+        const xFwd = vRoadX(c);
         ctx.beginPath(); ctx.moveTo(xFwd, y0); ctx.lineTo(xFwd, y0 + fwdCount * (C + LANE_GAP) - LANE_GAP); ctx.stroke();
-        // hBwd stop line
-        const xBwd = PAD + (cell + 1) * C;
+        // hBwd stop line (right edge of intersection)
+        const xBwd = vRoadX(c) + ROAD_W;
         ctx.beginPath(); ctx.moveTo(xBwd, y0 + fwdCount * (C + LANE_GAP)); ctx.lineTo(xBwd, y0 + ROAD_W); ctx.stroke();
-      });
+      }
 
       // 4. Draw Lane Direction Arrows
-      g.hInt.forEach(cell => {
-        const c = g.hInt.indexOf(cell);
-        if (!g.present[r][c]) return;
+      for (let c = 0; c < g.NUM_V; c++) {
+        if (!g.present[r][c]) continue;
         
         // hFwd Arrows (driver goes East ->, rot = 0)
-        const xArrow = PAD + (cell - 3) * C + C / 2;
+        const xArrow = vRoadX(c) - 3 * C + C / 2;
         for (let l = 0; l < fwdCount; l++) {
           let type = "straight";
           if (l === 0) type = "straight_left";
@@ -394,14 +390,14 @@ export default function TrafficSimSpec() {
         }
         
         // hBwd Arrows (driver goes West <-, rot = Math.PI)
-        const xArrowBwd = PAD + (cell + 3) * C + C / 2;
+        const xArrowBwd = vRoadX(c) + ROAD_W + 2 * C + C / 2;
         for (let l = 0; l < bwdCount; l++) {
           let type = "straight";
           if (l === 0) type = "straight_left";
           else if (l === bwdCount - 1) type = "straight_right";
           drawVectorArrow(xArrowBwd, y0 + (fwdCount + l) * (C + LANE_GAP) + C / 2, Math.PI, type);
         }
-      });
+      }
     }
 
     // Draw vertical road markings
@@ -428,13 +424,12 @@ export default function TrafficSimSpec() {
         ctx.strokeStyle = "#ffffff";
         ctx.lineWidth = 0.8;
         ctx.setLineDash([]);
-        g.vInt.forEach(cell => {
-          const r = g.vInt.indexOf(cell);
-          if (!g.present[r][c]) return;
-          const start = PAD + Math.max(0, cell - 6) * C;
-          const end = PAD + cell * C;
-          ctx.beginPath(); ctx.moveTo(xL, start); ctx.lineTo(xL, end); ctx.stroke();
-        });
+        for (let r = 0; r < g.NUM_H; r++) {
+          if (!g.present[r][c]) continue;
+          const stopY = hRoadY(r);
+          const startY = Math.max(PAD, stopY - 6 * C);
+          ctx.beginPath(); ctx.moveTo(xL, startY); ctx.lineTo(xL, stopY); ctx.stroke();
+        }
       }
       // vBwd lane dividers
       for (let l = 1; l < bwdCount; l++) {
@@ -444,37 +439,34 @@ export default function TrafficSimSpec() {
         ctx.strokeStyle = "#ffffff";
         ctx.lineWidth = 0.8;
         ctx.setLineDash([]);
-        g.vInt.forEach(cell => {
-          const r = g.vInt.indexOf(cell);
-          if (!g.present[r][c]) return;
-          const start = PAD + (cell + 1) * C;
-          const end = PAD + Math.min(g.VLEN, cell + 7) * C;
-          ctx.beginPath(); ctx.moveTo(xL, start); ctx.lineTo(xL, end); ctx.stroke();
-        });
+        for (let r = 0; r < g.NUM_H; r++) {
+          if (!g.present[r][c]) continue;
+          const stopY = hRoadY(r) + ROAD_W;
+          const endY = Math.min(PAD + g.VLEN * C, stopY + 6 * C);
+          ctx.beginPath(); ctx.moveTo(xL, stopY); ctx.lineTo(xL, endY); ctx.stroke();
+        }
       }
 
       // 3. Draw Stop Lines
       ctx.strokeStyle = "#ffffff";
       ctx.lineWidth = 1.5;
       ctx.setLineDash([]);
-      g.vInt.forEach(cell => {
-        const r = g.vInt.indexOf(cell);
-        if (!g.present[r][c]) return;
-        // vFwd stop line
-        const yFwd = PAD + cell * C;
+      for (let r = 0; r < g.NUM_H; r++) {
+        if (!g.present[r][c]) continue;
+        // vFwd stop line (top edge of intersection)
+        const yFwd = hRoadY(r);
         ctx.beginPath(); ctx.moveTo(x0, yFwd); ctx.lineTo(x0 + fwdCount * (C + LANE_GAP) - LANE_GAP, yFwd); ctx.stroke();
-        // vBwd stop line
-        const yBwd = PAD + (cell + 1) * C;
+        // vBwd stop line (bottom edge of intersection)
+        const yBwd = hRoadY(r) + ROAD_W;
         ctx.beginPath(); ctx.moveTo(x0 + fwdCount * (C + LANE_GAP), yBwd); ctx.lineTo(x0 + ROAD_W, yBwd); ctx.stroke();
-      });
+      }
 
       // 4. Draw Lane Direction Arrows
-      g.vInt.forEach(cell => {
-        const r = g.vInt.indexOf(cell);
-        if (!g.present[r][c]) return;
+      for (let r = 0; r < g.NUM_H; r++) {
+        if (!g.present[r][c]) continue;
         
         // vFwd Arrows (driver goes South |v, rot = Math.PI / 2)
-        const yArrow = PAD + (cell - 3) * C + C / 2;
+        const yArrow = hRoadY(r) - 3 * C + C / 2;
         for (let l = 0; l < fwdCount; l++) {
           let type = "straight";
           if (l === 0) type = "straight_left";
@@ -483,14 +475,14 @@ export default function TrafficSimSpec() {
         }
         
         // vBwd Arrows (driver goes North ^|, rot = Math.PI * 1.5)
-        const yArrowBwd = PAD + (cell + 3) * C + C / 2;
+        const yArrowBwd = hRoadY(r) + ROAD_W + 2 * C + C / 2;
         for (let l = 0; l < bwdCount; l++) {
           let type = "straight";
           if (l === 0) type = "straight_left";
           else if (l === bwdCount - 1) type = "straight_right";
           drawVectorArrow(x0 + (fwdCount + l) * (C + LANE_GAP) + C / 2, yArrowBwd, Math.PI * 1.5, type);
         }
-      });
+      }
     }
 
     // Draw Traffic Lights
