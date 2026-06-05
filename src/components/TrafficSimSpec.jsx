@@ -101,6 +101,144 @@ export default function TrafficSimSpec() {
     laneInterpolation.current.clear();
   };
 
+  const getVehicleCoords = (roadType, idx, lane, pos, currentSim) => {
+    if (!currentSim) return { px: 0, py: 0 };
+    const g = currentSim.g;
+    const C = 6;
+    const LANE_GAP = 1;
+    const PAD = 20;
+    const ROAD_W = C * 6 + LANE_GAP * 5;
+    const hRoadY = (r) => PAD + g.vInt[r] * C + C / 2 - ROAD_W / 2;
+    const vRoadX = (c) => PAD + g.hInt[c] * C + C / 2 - ROAD_W / 2;
+
+    let px = 0;
+    let py = 0;
+
+    const bwdCountH = currentSim.hBwd[idx] ? currentSim.hBwd[idx].length : 3;
+    const bwdCountV = currentSim.vBwd[idx] ? currentSim.vBwd[idx].length : 3;
+    const fwdCountV = currentSim.vFwd[idx] ? currentSim.vFwd[idx].length : 3;
+
+    if (roadType === 'hFwd' || roadType === 'hBwd') {
+      const y0 = hRoadY(idx);
+      if (roadType === 'hFwd') {
+        py = y0 + (bwdCountH + lane) * (C + LANE_GAP);
+        
+        let found = false;
+        let prevX = PAD;
+        let prevCell = -1;
+        for (let c = 0; c < g.NUM_V; c++) {
+          const stopCell = g.hInt[c];
+          if (pos < stopCell) {
+            const startX = prevX;
+            const endX = vRoadX(c);
+            const cellsInSeg = stopCell - prevCell - 1;
+            const localPos = pos - prevCell - 1;
+            px = startX + localPos * (endX - startX - C) / Math.max(1, cellsInSeg - 1);
+            found = true;
+            break;
+          } else if (pos === stopCell) {
+            px = vRoadX(c) + ROAD_W / 2 - C / 2;
+            found = true;
+            break;
+          }
+          prevX = vRoadX(c) + ROAD_W;
+          prevCell = stopCell;
+        }
+        if (!found) {
+          px = prevX + (pos - prevCell - 1) * C;
+        }
+      } else {
+        py = y0 + lane * (C + LANE_GAP);
+        const physPos = mirror(pos, g.HLEN);
+        
+        let found = false;
+        let prevX = PAD + g.HLEN * C;
+        let prevCell = g.HLEN;
+        for (let c = g.NUM_V - 1; c >= 0; c--) {
+          const stopCell = g.hInt[c];
+          if (physPos > stopCell) {
+            const startX = prevX;
+            const endX = vRoadX(c) + ROAD_W;
+            const cellsInSeg = prevCell - stopCell - 1;
+            const localPos = prevCell - physPos - 1;
+            px = startX - localPos * (startX - endX - C) / Math.max(1, cellsInSeg - 1) - C;
+            found = true;
+            break;
+          } else if (physPos === stopCell) {
+            px = vRoadX(c) + ROAD_W / 2 - C / 2;
+            found = true;
+            break;
+          }
+          prevX = vRoadX(c);
+          prevCell = stopCell;
+        }
+        if (!found) {
+          px = prevX - (prevCell - physPos - 1) * C - C;
+        }
+      }
+    } else {
+      const x0 = vRoadX(idx);
+      if (roadType === 'vFwd') {
+        px = x0 + lane * (C + LANE_GAP);
+        
+        let found = false;
+        let prevY = PAD;
+        let prevCell = -1;
+        for (let r = 0; r < g.NUM_H; r++) {
+          const stopCell = g.vInt[r];
+          if (pos < stopCell) {
+            const startY = prevY;
+            const endY = hRoadY(r);
+            const cellsInSeg = stopCell - prevCell - 1;
+            const localPos = pos - prevCell - 1;
+            py = startY + localPos * (endY - startY - C) / Math.max(1, cellsInSeg - 1);
+            found = true;
+            break;
+          } else if (pos === stopCell) {
+            py = hRoadY(r) + ROAD_W / 2 - C / 2;
+            found = true;
+            break;
+          }
+          prevY = hRoadY(r) + ROAD_W;
+          prevCell = stopCell;
+        }
+        if (!found) {
+          py = prevY + (pos - prevCell - 1) * C;
+        }
+      } else {
+        px = x0 + (fwdCountV + lane) * (C + LANE_GAP);
+        const physPos = mirror(pos, g.VLEN);
+        
+        let found = false;
+        let prevY = PAD + g.VLEN * C;
+        let prevCell = g.VLEN;
+        for (let r = g.NUM_H - 1; r >= 0; r--) {
+          const stopCell = g.vInt[r];
+          if (physPos > stopCell) {
+            const startY = prevY;
+            const endY = hRoadY(r) + ROAD_W;
+            const cellsInSeg = prevCell - stopCell - 1;
+            const localPos = prevCell - physPos - 1;
+            py = startY - localPos * (startY - endY - C) / Math.max(1, cellsInSeg - 1) - C;
+            found = true;
+            break;
+          } else if (physPos === stopCell) {
+            py = hRoadY(r) + ROAD_W / 2 - C / 2;
+            found = true;
+            break;
+          }
+          prevY = hRoadY(r);
+          prevCell = stopCell;
+        }
+        if (!found) {
+          py = prevY - (prevCell - physPos - 1) * C - C;
+        }
+      }
+    }
+
+    return { px, py };
+  };
+
   useEffect(() => {
     initializeSimulation();
     return () => {
@@ -407,7 +545,7 @@ export default function TrafficSimSpec() {
       const bwdCount = sim.vBwd[c].length;
 
       // 1. Center Line / Reversible Lane Line
-      const boundaryX = x0 + bwdCount * (C + LANE_GAP) - LANE_GAP / 2;
+      const boundaryX = x0 + fwdCount * (C + LANE_GAP) - LANE_GAP / 2;
       if (sim.revModeV[c] === "none") {
         drawVerticalLineInSegments(c, boundaryX, "#eab308", 1.2, [6, 6]);
       } else {
@@ -416,24 +554,9 @@ export default function TrafficSimSpec() {
       }
 
       // 2. Draw lane lines
-      // vBwd lane dividers (left half, Northbound)
-      for (let l = 1; l < bwdCount; l++) {
-        const xL = x0 + l * (C + LANE_GAP) - LANE_GAP / 2;
-        drawVerticalLineInSegments(c, xL, "rgba(255, 255, 255, 0.15)", 0.8, [2, 4]);
-        
-        ctx.strokeStyle = "#ffffff";
-        ctx.lineWidth = 0.8;
-        ctx.setLineDash([]);
-        for (let r = 0; r < g.NUM_H; r++) {
-          if (!g.present[r][c]) continue;
-          const stopY = hRoadY(r) + ROAD_W;
-          const endY = Math.min(PAD + g.VLEN * C, stopY + 6 * C);
-          ctx.beginPath(); ctx.moveTo(xL, stopY); ctx.lineTo(xL, endY); ctx.stroke();
-        }
-      }
-      // vFwd lane dividers (right half, Southbound)
+      // vFwd lane dividers (left half, Southbound)
       for (let l = 1; l < fwdCount; l++) {
-        const xL = x0 + (bwdCount + l) * (C + LANE_GAP) - LANE_GAP / 2;
+        const xL = x0 + l * (C + LANE_GAP) - LANE_GAP / 2;
         drawVerticalLineInSegments(c, xL, "rgba(255, 255, 255, 0.15)", 0.8, [2, 4]);
         
         ctx.strokeStyle = "#ffffff";
@@ -446,6 +569,21 @@ export default function TrafficSimSpec() {
           ctx.beginPath(); ctx.moveTo(xL, startY); ctx.lineTo(xL, stopY); ctx.stroke();
         }
       }
+      // vBwd lane dividers (right half, Northbound)
+      for (let l = 1; l < bwdCount; l++) {
+        const xL = x0 + (fwdCount + l) * (C + LANE_GAP) - LANE_GAP / 2;
+        drawVerticalLineInSegments(c, xL, "rgba(255, 255, 255, 0.15)", 0.8, [2, 4]);
+        
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 0.8;
+        ctx.setLineDash([]);
+        for (let r = 0; r < g.NUM_H; r++) {
+          if (!g.present[r][c]) continue;
+          const stopY = hRoadY(r) + ROAD_W;
+          const endY = Math.min(PAD + g.VLEN * C, stopY + 6 * C);
+          ctx.beginPath(); ctx.moveTo(xL, stopY); ctx.lineTo(xL, endY); ctx.stroke();
+        }
+      }
 
       // 3. Draw Stop Lines
       ctx.strokeStyle = "#ffffff";
@@ -453,34 +591,34 @@ export default function TrafficSimSpec() {
       ctx.setLineDash([]);
       for (let r = 0; r < g.NUM_H; r++) {
         if (!g.present[r][c]) continue;
-        // vBwd stop line (left half, Northbound, stops at bottom edge)
-        const yBwd = hRoadY(r) + ROAD_W;
-        ctx.beginPath(); ctx.moveTo(x0, yBwd); ctx.lineTo(x0 + bwdCount * (C + LANE_GAP) - LANE_GAP, yBwd); ctx.stroke();
-        // vFwd stop line (right half, Southbound, stops at top edge)
+        // vFwd stop line (left half, Southbound, stops at top edge)
         const yFwd = hRoadY(r);
-        ctx.beginPath(); ctx.moveTo(x0 + bwdCount * (C + LANE_GAP), yFwd); ctx.lineTo(x0 + ROAD_W, yFwd); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(x0, yFwd); ctx.lineTo(x0 + fwdCount * (C + LANE_GAP) - LANE_GAP, yFwd); ctx.stroke();
+        // vBwd stop line (right half, Northbound, stops at bottom edge)
+        const yBwd = hRoadY(r) + ROAD_W;
+        ctx.beginPath(); ctx.moveTo(x0 + fwdCount * (C + LANE_GAP), yBwd); ctx.lineTo(x0 + ROAD_W, yBwd); ctx.stroke();
       }
 
       // 4. Draw Lane Direction Arrows
       for (let r = 0; r < g.NUM_H; r++) {
         if (!g.present[r][c]) continue;
         
-        // vBwd Arrows (driver goes North ^|, rot = Math.PI * 1.5, left half)
-        const yArrowBwd = hRoadY(r) + ROAD_W + 2 * C + C / 2;
-        for (let l = 0; l < bwdCount; l++) {
-          let type = "straight";
-          if (l === bwdCount - 1) type = "straight_left";
-          else if (l === 0) type = "straight_right";
-          drawVectorArrow(x0 + l * (C + LANE_GAP) + C / 2, yArrowBwd, Math.PI * 1.5, type);
-        }
-
-        // vFwd Arrows (driver goes South |v, rot = Math.PI / 2, right half)
+        // vFwd Arrows (driver goes South |v, rot = Math.PI / 2, left half)
         const yArrow = hRoadY(r) - 3 * C + C / 2;
         for (let l = 0; l < fwdCount; l++) {
           let type = "straight";
+          if (l === fwdCount - 1) type = "straight_left";
+          else if (l === 0) type = "straight_right";
+          drawVectorArrow(x0 + l * (C + LANE_GAP) + C / 2, yArrow, Math.PI / 2, type);
+        }
+
+        // vBwd Arrows (driver goes North ^|, rot = Math.PI * 1.5, right half)
+        const yArrowBwd = hRoadY(r) + ROAD_W + 2 * C + C / 2;
+        for (let l = 0; l < bwdCount; l++) {
+          let type = "straight";
           if (l === 0) type = "straight_left";
-          else if (l === fwdCount - 1) type = "straight_right";
-          drawVectorArrow(x0 + (bwdCount + l) * (C + LANE_GAP) + C / 2, yArrow, Math.PI / 2, type);
+          else if (l === bwdCount - 1) type = "straight_right";
+          drawVectorArrow(x0 + (fwdCount + l) * (C + LANE_GAP) + C / 2, yArrowBwd, Math.PI * 1.5, type);
         }
       }
     }
@@ -507,14 +645,14 @@ export default function TrafficSimSpec() {
         ctx.fillStyle = hg ? theme.success : theme.danger;
         ctx.beginPath(); ctx.arc(hBwdX, hBwdY, 2.5, 0, Math.PI * 2); ctx.fill();
 
-        // 3. vFwd Light (going South, right half, stops at top edge)
-        const vFwdX = vRoadX(c) + bwdCountV * (C + LANE_GAP) + fwdCountV * (C + LANE_GAP) / 2 - LANE_GAP / 2;
+        // 3. vFwd Light (going South, left half, stops at top edge)
+        const vFwdX = vRoadX(c) + fwdCountV * (C + LANE_GAP) / 2 - LANE_GAP / 2;
         const vFwdY = hRoadY(r);
         ctx.fillStyle = !hg ? theme.success : theme.danger;
         ctx.beginPath(); ctx.arc(vFwdX, vFwdY, 2.5, 0, Math.PI * 2); ctx.fill();
 
-        // 4. vBwd Light (going North, left half, stops at bottom edge)
-        const vBwdX = vRoadX(c) + bwdCountV * (C + LANE_GAP) / 2 - LANE_GAP / 2;
+        // 4. vBwd Light (going North, right half, stops at bottom edge)
+        const vBwdX = vRoadX(c) + fwdCountV * (C + LANE_GAP) + bwdCountV * (C + LANE_GAP) / 2 - LANE_GAP / 2;
         const vBwdY = hRoadY(r) + ROAD_W;
         ctx.fillStyle = !hg ? theme.success : theme.danger;
         ctx.beginPath(); ctx.arc(vBwdX, vBwdY, 2.5, 0, Math.PI * 2); ctx.fill();
@@ -528,26 +666,7 @@ export default function TrafficSimSpec() {
       const lane = car.lane;
       const pos = car.pos;
 
-      let px = 0;
-      let py = 0;
-
-      const bwdCountH = sim.hBwd[idx] ? sim.hBwd[idx].length : 3;
-      const bwdCountV = sim.vBwd[idx] ? sim.vBwd[idx].length : 3;
-
-      // Coordinate matching (RHT - Right Hand Traffic)
-      if (roadType === 'hFwd') {
-        px = PAD + pos * C;
-        py = hRoadY(idx) + (bwdCountH + lane) * (C + LANE_GAP);
-      } else if (roadType === 'hBwd') {
-        px = PAD + mirror(pos, g.HLEN) * C;
-        py = hRoadY(idx) + lane * (C + LANE_GAP);
-      } else if (roadType === 'vFwd') {
-        px = vRoadX(idx) + (bwdCountV + lane) * (C + LANE_GAP);
-        py = PAD + pos * C;
-      } else if (roadType === 'vBwd') {
-        px = vRoadX(idx) + lane * (C + LANE_GAP);
-        py = PAD + mirror(pos, g.VLEN) * C;
-      }
+      const { px, py } = getVehicleCoords(roadType, idx, lane, pos, sim);
 
       // Highlight tracked car
       if (trackedVehicleId === car.id) {
@@ -606,24 +725,7 @@ export default function TrafficSimSpec() {
     let minDist = 15; // Max click distance 15px
 
     activeVehicles.forEach(car => {
-      let px = 0, py = 0;
-      const idx = car.roadIdx;
-      const bwdCountH = sim.hBwd[idx] ? sim.hBwd[idx].length : 3;
-      const bwdCountV = sim.vBwd[idx] ? sim.vBwd[idx].length : 3;
-
-      if (car.roadType === 'hFwd') {
-        px = PAD + car.pos * C;
-        py = hRoadY(idx) + (bwdCountH + car.lane) * (C + LANE_GAP);
-      } else if (car.roadType === 'hBwd') {
-        px = PAD + mirror(car.pos, g.HLEN) * C;
-        py = hRoadY(idx) + car.lane * (C + LANE_GAP);
-      } else if (car.roadType === 'vFwd') {
-        px = vRoadX(idx) + (bwdCountV + car.lane) * (C + LANE_GAP);
-        py = PAD + car.pos * C;
-      } else if (car.roadType === 'vBwd') {
-        px = vRoadX(idx) + car.lane * (C + LANE_GAP);
-        py = PAD + mirror(car.pos, g.VLEN) * C;
-      }
+      const { px, py } = getVehicleCoords(car.roadType, car.roadIdx, car.lane, car.pos, sim);
 
       const dist = Math.sqrt((x - px) ** 2 + (y - py) ** 2);
       if (dist < minDist) {
