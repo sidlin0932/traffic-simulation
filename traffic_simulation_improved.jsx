@@ -1675,8 +1675,11 @@ export default function TrafficSim() {
 
   const labelFor = (id) => SIGNAL_MODES.find(m => m.id === id)?.label ?? id;
   const pct = expResults ? (((expResults.b.throughput - expResults.a.throughput) / Math.max(expResults.a.throughput, 1e-9)) * 100) : 0;
-  const ttChange = expResults && expResults.opts.routed
-    ? (((expResults.b.avgTravelTime - expResults.a.avgTravelTime) / Math.max(expResults.a.avgTravelTime, 1e-9)) * 100) : 0;
+  // routed 已由 useState 定義（第1489行），直接使用
+  // 仅在路由开启时计算旅行时间变化百分比，否则返回 0
+  const ttChange = expResults && routed
+    ? (((expResults.b.avgTravelTime - expResults.a.avgTravelTime) / Math.max(expResults.a.avgTravelTime, 1e-9)) * 100)
+    : 0;
 
   return (
     <div style={{

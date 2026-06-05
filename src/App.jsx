@@ -1,9 +1,10 @@
 import { useState } from "react";
+import TrafficSimSpec from "./components/TrafficSimSpec.jsx";
 import TrafficSimImproved from "../traffic_simulation_improved.jsx";
 import TrafficSimOriginal from "../traffic_simulation_destination.jsx";
 
 function App() {
-  const [version, setVersion] = useState("improved");
+  const [version, setVersion] = useState("spec");
 
   return (
     <div style={{ background: "#0a0a12", minHeight: "100vh" }}>
@@ -33,14 +34,14 @@ function App() {
             transition: "all 0.2s"
           }}
         >
-          原始對照組 (Original Baseline)
+          原始對照組 (Original Baseline V0)
         </button>
         <button 
           onClick={() => setVersion("improved")}
           style={{
-            background: version === "improved" ? "#6366f1" : "#1e1e32",
+            background: version === "improved" ? "#eab308" : "#1e1e32",
             color: version === "improved" ? "#fff" : "#b8b8d0",
-            border: version === "improved" ? "1px solid #818cf8" : "1px solid #30304a",
+            border: version === "improved" ? "1px solid #fef08a" : "1px solid #30304a",
             borderRadius: "4px",
             padding: "5px 14px",
             cursor: "pointer",
@@ -49,10 +50,28 @@ function App() {
             transition: "all 0.2s"
           }}
         >
-          論文實驗組 (Improved Thesis Version)
+          論文實驗組 (Improved Thesis V1)
+        </button>
+        <button 
+          onClick={() => setVersion("spec")}
+          style={{
+            background: version === "spec" ? "#6366f1" : "#1e1e32",
+            color: version === "spec" ? "#fff" : "#b8b8d0",
+            border: version === "spec" ? "1px solid #818cf8" : "1px solid #30304a",
+            borderRadius: "4px",
+            padding: "5px 14px",
+            cursor: "pointer",
+            fontSize: "11px",
+            fontWeight: "bold",
+            transition: "all 0.2s"
+          }}
+        >
+          雙車道 API & Spec Dashboard (V2 New)
         </button>
       </div>
-      {version === "improved" ? <TrafficSimImproved /> : <TrafficSimOriginal />}
+      {version === "spec" && <TrafficSimSpec />}
+      {version === "improved" && <TrafficSimImproved />}
+      {version === "original" && <TrafficSimOriginal />}
     </div>
   );
 }
