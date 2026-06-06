@@ -63,6 +63,115 @@ export default function TrafficSimSpec() {
   const [expResults, setExpResults] = useState(null);
   const [trackedVehicleId, setTrackedVehicleId] = useState(null);
 
+  // Batch Simulation State
+  const [batchSeeds, setBatchSeeds] = useState("42, 100, 2026, 999");
+  const [batchSignalModes, setBatchSignalModes] = useState(["all_sync", "alternating", "green_wave"]);
+  const [batchDensities, setBatchDensities] = useState([0.12, 0.16, 0.20]);
+  const [batchRunning, setBatchRunning] = useState(false);
+  const [batchResults, setBatchResults] = useState([]);
+  const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0 });
+
+  const runBatchSimulation = async () => {
+    if (batchRunning) return;
+    setBatchRunning(true);
+    setBatchResults([]);
+    
+    const seeds = batchSeeds.split(",").map(s => parseInt(s.trim())).filter(s => !isNaN(s));
+    const combinations = [];
+    
+    for (const seedVal of seeds) {
+      for (const modeVal of batchSignalModes) {
+        for (const densityVal of batchDensities) {
+          combinations.push({ seed: seedVal, signalMode: modeVal, density: densityVal });
+        }
+      }
+    }
+    
+    if (combinations.length === 0) {
+      alert("請至少選擇或設定一組種子、號誌模式與背景密度！");
+      setBatchRunning(false);
+      return;
+    }
+    
+    setBatchProgress({ current: 0, total: combinations.length });
+    
+    const results = [];
+    for (let i = 0; i < combinations.length; i++) {
+      const combo = combinations[i];
+      setBatchProgress({ current: i + 1, total: combinations.length });
+      
+      // Yield control to the browser to render progress update
+      await new Promise(resolve => setTimeout(resolve, 30));
+      
+      try {
+        const sim = new GridSimulation({
+          seed: combo.seed,
+          hRoads: hRoads,
+          vRoads: vRoads,
+          intersectionRules: intersectionRules,
+          simulationSteps: steps,
+          experimentType: expType,
+          exportTrajectories: false,
+          segLength: segLength,
+          signalMode: combo.signalMode,
+          backgroundDensity: combo.density,
+          params: {
+            delta_t: deltaT,
+            p_change_background: pChangeBg,
+            p_change_subject: pChangeSub,
+            turn_probability: turnProbability
+          }
+        });
+        
+        const simRes = sim.run();
+        const runMetrics = simRes.metrics;
+        const isAnomalous = runMetrics.phantom_jams_detected > 3 || runMetrics.avg_delay_background > 150;
+        
+        results.push({
+          id: i + 1,
+          seed: combo.seed,
+          signalMode: combo.signalMode,
+          density: combo.density,
+          throughput: runMetrics.arrived_count ?? 0,
+          avgSpeed: runMetrics.avg_speed_background ?? 0,
+          avgDelay: runMetrics.avg_delay_background ?? 0,
+          phantomJams: runMetrics.phantom_jams_detected ?? 0,
+          isAnomalous,
+          hRoads: JSON.parse(JSON.stringify(hRoads)),
+          vRoads: JSON.parse(JSON.stringify(vRoads)),
+          intersectionRules: JSON.parse(JSON.stringify(intersectionRules)),
+          steps: steps
+        });
+        
+        setBatchResults([...results]);
+      } catch (err) {
+        console.error("Batch simulation run error:", err);
+      }
+    }
+    
+    setBatchRunning(false);
+  };
+
+  const loadRunIntoVisualizer = (run) => {
+    setSeed(run.seed);
+    setDensity(run.density);
+    setSignalMode(run.signalMode);
+    if (run.steps) setSteps(run.steps);
+    if (run.hRoads) setHRoads(run.hRoads);
+    if (run.vRoads) setVRoads(run.vRoads);
+    if (run.intersectionRules) setIntersectionRules(run.intersectionRules);
+    
+    setActiveTab("visualizer");
+    setIsPlaying(false);
+    if (animationRef.current) clearInterval(animationRef.current);
+    
+    setTimeout(() => {
+      initializeSimulation();
+      setIsPlaying(true);
+      animationRef.current = setInterval(stepSimulation, simSpeed);
+    }, 200);
+  };
+
   // Exp A Sweep State
   const [sweepData, setSweepData] = useState([]);
   const [bestL, setBestL] = useState(null);
@@ -1222,6 +1331,7 @@ export default function TrafficSimSpec() {
         }}>
           {[
             { id: "visualizer", label: "實時可視化" },
+            { id: "batchSim", label: "自動化批量模擬" },
             { id: "experimentA", label: "實驗 A: 空間逆推" },
             { id: "experimentB", label: "實驗 B: 行為對抗" },
             { id: "spec", label: "API 規格文件" }
@@ -1832,28 +1942,31 @@ export default function TrafficSimSpec() {
                     ⚙️ 匯入/匯出配置
                   </button>
                 </div>
-                <div style={{ display: "flex", gap: "14px", fontSize: "12px" }}>
+                <div style={{ display: "flex", gap: "14px", flexWrap: "wrap", fontSize: "12px" }}>
                   <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-                    <span style={{ width: "10px", height: "10px", borderRadius: "50%", background: "linear-gradient(to bottom, #22d3ee, #0369a1)" }}></span> 背景車
+                    <span style={{ width: "10px", height: "10px", borderRadius: "50%", background: "linear-gradient(to bottom, #22d3ee, #0369a1)" }}></span>
+                    <strong style={{ color: "#22d3ee" }}>青藍色</strong> 背景車
+                  </span>
+                  <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                    <span style={{ width: "10px", height: "10px", borderRadius: "50%", background: "linear-gradient(to bottom, #ffedd5, #ea580c)" }}></span>
+                    <strong style={{ color: "#ea580c" }}>橘色/閃爍藍燈</strong> 救護車
                   </span>
                   {expType === 'B1' && (
                     <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-                      <span style={{ width: "10px", height: "10px", borderRadius: "50%", background: "linear-gradient(to bottom, #fbbf24, #b45309)" }}></span> 切車魔人
+                      <span style={{ width: "10px", height: "10px", borderRadius: "50%", background: "linear-gradient(to bottom, #fbbf24, #b45309)" }}></span>
+                      <strong style={{ color: "#fbbf24" }}>橘黃色</strong> 切車魔人
                     </span>
                   )}
                   {expType === 'B2' && (
-                    <>
-                      <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-                        <span style={{ width: "10px", height: "10px", borderRadius: "50%", background: "linear-gradient(to bottom, #ef4444, #991b1b)" }}></span> 吸血鬼(尾隨車)
-                      </span>
-                      <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-                        <span style={{ width: "10px", height: "10px", borderRadius: "50%", background: "linear-gradient(to bottom, #ffedd5, #ea580c)" }}></span> 救護車
-                      </span>
-                    </>
+                    <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                      <span style={{ width: "10px", height: "10px", borderRadius: "50%", background: "linear-gradient(to bottom, #ef4444, #991b1b)" }}></span>
+                      <strong style={{ color: "#ef4444" }}>紅色</strong> 吸血鬼(尾隨車)
+                    </span>
                   )}
                   {expType !== 'B1' && expType !== 'B2' && (
                     <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-                      <span style={{ width: "10px", height: "10px", borderRadius: "50%", background: "linear-gradient(to bottom, #e879f9, #a21caf)" }}></span> 主體車
+                      <span style={{ width: "10px", height: "10px", borderRadius: "50%", background: "linear-gradient(to bottom, #e879f9, #a21caf)" }}></span>
+                      <strong style={{ color: "#e879f9" }}>紫色</strong> 主體車
                     </span>
                   )}
                 </div>
@@ -2531,6 +2644,236 @@ export default function TrafficSimSpec() {
               點擊上方按鈕，以前台與後台的對照組資料進行情境對比分析
             </div>
           )}
+        </div>
+      )}
+
+      {/* Tab Content - Batch Sim Dashboard */}
+      {activeTab === "batchSim" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "320px 1fr", gap: "20px" }}>
+            {/* Settings Left Column */}
+            <div style={{
+              background: "rgba(31, 40, 51, 0.45)",
+              border: "1px solid rgba(255,255,255,0.06)",
+              borderRadius: "16px",
+              padding: "20px",
+              display: "flex",
+              flexDirection: "column",
+              gap: "20px"
+            }}>
+              <div>
+                <h3 style={{ margin: "0 0 12px 0", color: theme.textLight, fontSize: "16px" }}>批量掃描配置</h3>
+                <p style={{ margin: "0 0 16px 0", fontSize: "12px", color: theme.textMuted }}>設定欲掃描的各種參數組合，一鍵在本機瀏覽器完成高通量模擬統計。</p>
+              </div>
+
+              {/* Seeds input */}
+              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                <span style={{ fontSize: "12px", color: theme.text, fontWeight: "bold" }}>隨機數種子 (逗號分隔)</span>
+                <input
+                  type="text"
+                  value={batchSeeds}
+                  onChange={(e) => setBatchSeeds(e.target.value)}
+                  style={{
+                    background: "#0b0c10", color: theme.primary, border: "1px solid rgba(255,255,255,0.15)",
+                    borderRadius: "6px", padding: "8px", fontSize: "12px", outline: "none"
+                  }}
+                  placeholder="例如: 42, 100, 2026, 999"
+                />
+              </div>
+
+              {/* Signal Modes multi-select */}
+              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                <span style={{ fontSize: "12px", color: theme.text, fontWeight: "bold" }}>測試號誌模式</span>
+                <div style={{ display: "flex", flexDirection: "column", gap: "6px", background: "#161b22", padding: "10px", borderRadius: "8px" }}>
+                  {[
+                    { id: "all_sync", label: "全同步 (All Sync)" },
+                    { id: "alternating", label: "交替模式 (Alternating)" },
+                    { id: "green_wave", label: "綠波協調 (Green Wave)" }
+                  ].map(modeOpt => {
+                    const checked = batchSignalModes.includes(modeOpt.id);
+                    return (
+                      <label key={modeOpt.id} style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "12px", cursor: "pointer", color: theme.text }}>
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => {
+                            if (checked) {
+                              setBatchSignalModes(batchSignalModes.filter(m => m !== modeOpt.id));
+                            } else {
+                              setBatchSignalModes([...batchSignalModes, modeOpt.id]);
+                            }
+                          }}
+                          style={{ cursor: "pointer" }}
+                        />
+                        {modeOpt.label}
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Densities multi-select */}
+              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                <span style={{ fontSize: "12px", color: theme.text, fontWeight: "bold" }}>測試背景車流密度</span>
+                <div style={{ display: "flex", flexDirection: "column", gap: "6px", background: "#161b22", padding: "10px", borderRadius: "8px" }}>
+                  {[
+                    { val: 0.12, label: "低車流 (0.12)" },
+                    { val: 0.16, label: "中車流 (0.16)" },
+                    { val: 0.20, label: "高車流 (0.20)" }
+                  ].map(densOpt => {
+                    const checked = batchDensities.includes(densOpt.val);
+                    return (
+                      <label key={densOpt.val} style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "12px", cursor: "pointer", color: theme.text }}>
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => {
+                            if (checked) {
+                              setBatchDensities(batchDensities.filter(d => d !== densOpt.val));
+                            } else {
+                              setBatchDensities([...batchDensities, densOpt.val]);
+                            }
+                          }}
+                          style={{ cursor: "pointer" }}
+                        />
+                        {densOpt.label}
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Start Button & Progress */}
+              <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginTop: "10px" }}>
+                <button
+                  onClick={runBatchSimulation}
+                  disabled={batchRunning}
+                  style={{
+                    background: batchRunning ? theme.textMuted : theme.primary,
+                    color: "#000",
+                    border: "none",
+                    borderRadius: "8px",
+                    padding: "12px",
+                    fontWeight: "bold",
+                    cursor: batchRunning ? "not-allowed" : "pointer",
+                    fontSize: "14px",
+                    transition: "all 0.2s"
+                  }}
+                >
+                  {batchRunning ? "⏳ 批量模擬計算中..." : "🚀 開始自動化批量跑模擬"}
+                </button>
+
+                {batchRunning && (
+                  <div style={{ marginTop: "10px" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: theme.textMuted, marginBottom: "4px" }}>
+                      <span>模擬進度</span>
+                      <span>{batchProgress.current} / {batchProgress.total} 組</span>
+                    </div>
+                    <div style={{ width: "100%", height: "8px", background: "#0b0c10", borderRadius: "4px", overflow: "hidden" }}>
+                      <div style={{
+                        width: `${(batchProgress.current / batchProgress.total) * 100}%`,
+                        height: "100%",
+                        background: `linear-gradient(to right, ${theme.primary}, ${theme.purple})`,
+                        transition: "width 0.1s ease-out"
+                      }}></div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Results Table Right Column */}
+            <div style={{
+              background: "rgba(31, 40, 51, 0.45)",
+              border: "1px solid rgba(255,255,255,0.06)",
+              borderRadius: "16px",
+              padding: "20px",
+              display: "flex",
+              flexDirection: "column",
+              gap: "20px"
+            }}>
+              <div>
+                <h3 style={{ margin: "0 0 6px 0", color: theme.textLight, fontSize: "16px" }}>批量掃描模擬結果</h3>
+                {batchResults.length > 0 ? (
+                  <p style={{ margin: 0, fontSize: "12px", color: theme.textMuted }}>
+                    已完成 <strong style={{ color: theme.primary }}>{batchResults.length}</strong> 組實驗。
+                    偵測到 <strong style={{ color: theme.danger }}>{batchResults.filter(r => r.isAnomalous).length}</strong> 組異常壅塞波 (幽靈塞車次數 &gt; 3 或 平均延滯 &gt; 150)。
+                  </p>
+                ) : (
+                  <p style={{ margin: 0, fontSize: "12px", color: theme.textMuted }}>尚未開始模擬。點擊左側按鈕開始進行高通量掃描統計。</p>
+                )}
+              </div>
+
+              {/* Scrollable Table Container */}
+              <div style={{ flex: 1, overflowY: "auto", maxHeight: "600px", border: "1px solid rgba(255,255,255,0.06)", borderRadius: "8px", background: "#0b0c10" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px", textAlign: "left" }}>
+                  <thead>
+                    <tr style={{ background: "#1f2833", color: theme.textLight, borderBottom: "1px solid rgba(255,255,255,0.1)" }}>
+                      <th style={{ padding: "10px" }}>編號</th>
+                      <th style={{ padding: "10px" }}>種子</th>
+                      <th style={{ padding: "10px" }}>號誌模式</th>
+                      <th style={{ padding: "10px" }}>車流密度</th>
+                      <th style={{ padding: "10px" }}>駛離吞吐量</th>
+                      <th style={{ padding: "10px" }}>平均速度</th>
+                      <th style={{ padding: "10px" }}>平均延滯</th>
+                      <th style={{ padding: "10px" }}>幽靈塞車</th>
+                      <th style={{ padding: "10px" }}>狀態</th>
+                      <th style={{ padding: "10px", textAlign: "center" }}>操作</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {batchResults.length > 0 ? (
+                      batchResults.map(run => (
+                        <tr key={run.id} style={{
+                          borderBottom: "1px solid rgba(255,255,255,0.05)",
+                          background: run.isAnomalous ? "rgba(252, 68, 69, 0.08)" : "transparent",
+                          color: run.isAnomalous ? theme.danger : theme.text,
+                          transition: "background 0.2s"
+                        }}>
+                          <td style={{ padding: "10px", fontWeight: "bold" }}>#{run.id}</td>
+                          <td style={{ padding: "10px" }}>{run.seed}</td>
+                          <td style={{ padding: "10px" }}>
+                            {run.signalMode === "all_sync" ? "全同步" : run.signalMode === "alternating" ? "交替" : "綠波協調"}
+                          </td>
+                          <td style={{ padding: "10px" }}>{run.density.toFixed(2)}</td>
+                          <td style={{ padding: "10px" }}>{run.throughput} 輛</td>
+                          <td style={{ padding: "10px" }}>{run.avgSpeed.toFixed(3)}</td>
+                          <td style={{ padding: "10px" }}>{run.avgDelay.toFixed(1)}</td>
+                          <td style={{ padding: "10px" }}>{run.phantomJams} 次</td>
+                          <td style={{ padding: "10px", fontWeight: "bold" }}>
+                            {run.isAnomalous ? "⚠️ 交通壅塞/波動" : "✅ 正常順暢"}
+                          </td>
+                          <td style={{ padding: "6px 10px", textAlign: "center" }}>
+                            <button
+                              onClick={() => loadRunIntoVisualizer(run)}
+                              style={{
+                                background: run.isAnomalous ? theme.danger : theme.primary,
+                                color: "#000",
+                                border: "none",
+                                borderRadius: "4px",
+                                padding: "4px 8px",
+                                fontSize: "11px",
+                                fontWeight: "bold",
+                                cursor: "pointer"
+                              }}
+                            >
+                              🔍 載入可視化
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan={10} style={{ padding: "30px", textAlign: "center", color: theme.textMuted }}>
+                          暫無結果。請在左側設定後，點擊「開始自動化批量跑模擬」。
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
