@@ -16,4 +16,4 @@ jobs:
         run: |
           # 請在下方雙引號中填入您 Render 專案的實際網址
           # 例如: curl -I "https://your-app-name.onrender.com"
-          curl -I "https://your-app-name.onrender.com"
+          curl -I "https://traffic-simulation-dk8x.onrender.com/"
