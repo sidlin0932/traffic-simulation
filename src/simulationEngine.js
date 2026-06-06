@@ -368,15 +368,17 @@ export class GridSimulation {
   spawnVehicles() {
     // 1. Spawn Emergency Car (starts on Horizontal 0 Forward, Lane 0)
     if (this.experimentType === 'B2' && this.tick === this.emergencySpawnTick && !this.emergencyCar) {
-      if (this.hFwd[0][0][0] === null) {
-        const id = this.vehicleIdCounter++;
-        const car = createVehicle(id, 'emergency', 'hFwd', 0, 0, 0, this.vMaxEmerg, 0.0, 0.0);
-        car.spawnTick = this.tick;
-        car.nextTurn = 'straight';
-        this.hFwd[0][0][0] = car;
-        this.vehicles.push(car);
-        this.emergencyCar = car;
+      const blockingCar = this.hFwd[0][0][0];
+      if (blockingCar !== null) {
+        this.vehicles = this.vehicles.filter(v => v.id !== blockingCar.id);
       }
+      const id = this.vehicleIdCounter++;
+      const car = createVehicle(id, 'emergency', 'hFwd', 0, 0, 0, this.vMaxEmerg, 0.0, 0.0);
+      car.spawnTick = this.tick;
+      car.nextTurn = 'straight';
+      this.hFwd[0][0][0] = car;
+      this.vehicles.push(car);
+      this.emergencyCar = car;
     }
 
     // 2. Spawn Subject Car (starts on Horizontal 0 Forward, Lane 0 or 1)
@@ -769,12 +771,32 @@ export class GridSimulation {
         v--;
       }
 
-      // 5. Subject vehicle tailgating metrics
-      if (car.type === 'subject' && this.experimentType === 'B2' && this.emergencyCar) {
+      // 5. Tailgating & Vampire check (any vehicle tailgating the emergency vehicle)
+      let isVampire = false;
+      if (this.emergencyCar) {
         const sameRoad = this.emergencyCar.roadType === roadType && this.emergencyCar.roadIdx === idx;
         const dist = this.emergencyCar.pos - x;
         if (sameRoad && dist > 0 && dist <= 3 && this.emergencyCar.lane === lane) {
-          car.tailgateTicks++;
+          isVampire = true;
+          if (car.type === 'subject' && this.experimentType === 'B2') {
+            car.tailgateTicks++;
+          }
+        }
+      }
+      car.isVampire = isVampire;
+      // Keep intersection clear (路口淨空) check
+      // If the next cell would be exactly an intersection cell, we must not enter it if we cannot clear it.
+      if (car.type !== 'emergency') {
+        const interPosList = intersections.map(p => (roadType === 'hBwd' || roadType === 'vBwd') ? mirror(p, maxLen) : p);
+        const rd = this.getRoad(roadType, idx)[lane];
+        for (const p of interPosList) {
+          if (x < p && (x + v) === p) {
+            // Only stop if the exit cell (p + 1) is blocked
+            if (p + 1 < rd.length && rd[p + 1] !== null) {
+              v = p - x - 1;
+              break;
+            }
+          }
         }
       }
 

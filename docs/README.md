@@ -52,9 +52,16 @@ Standard Taiwan-compliant driving rules are enforced:
 - **Lane and Stop Lines**: Rendered as solid white lines.
 - **Turn Guides**: High-quality vector arrows inside each lane indicating allowed direction transitions.
 
-### 3.4 Dynamic A* & BFS Routing
-- **BFS Directed Graph Routing**: Computes shortest paths dynamically adjusting for one-way grids and active reversible lane configurations.
-- **A\* Congestion-Aware Routing**: Includes static street weights and dynamic travel-time penalties to detour vehicles away from congested zones.
+### 3.5 Keep Intersection Clear (路口淨空)
+- **Intersection Clearance Enforcement**: Non-emergency vehicles check whether they can completely clear the intersection before crossing. If the exit lane immediately after the intersection is congested (causing the vehicle's calculated next position to stop exactly inside the intersection cell), the vehicle will proactively decelerate and stop at the entrance stop line (cell `p - 1`) to keep the intersection box clear and avoid multi-directional gridlocks.
+
+### 3.6 Microscopic Trajectory Tracking & Color System
+- **Vehicle Color Coding**:
+  - **Background Cars**: Cyan/Blue gradient (`#22d3ee` to `#0369a1`).
+  - **Weaving Demon (切車魔人 - Scenario 1)**: Distinctive Neon Amber/Gold gradient (`#fbbf24` to `#b45309`) with matching warning colors in the metrics table.
+  - **Vampire/Tailgater (Scenario 2)**: Crimson Red gradient (`#ef4444` to `#991b1b`).
+  - **Emergency Vehicle (Ambulance)**: Light Orange gradient (`#ffedd5` to `#ea580c`) with a flashing blue siren.
+- **Historical Trajectory Tracing**: Clicking any vehicle in the visualizer renders its detailed history path as a translucent purple dashed line on the canvas.
 
 ---
 

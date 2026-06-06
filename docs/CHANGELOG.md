@@ -4,6 +4,16 @@ All notable changes to the **Taipei Grid Microscopic Traffic Simulation System**
 
 ---
 
+## [1.7.1] - 2026-06-06
+### Added
+- **Keep Intersection Clear (路口淨空)**: Enforced a check preventing non-emergency vehicles from entering an intersection if they cannot fully clear it, resolving gridlock issues.
+- **Microscopic Trajectory Tracking**: Implemented historical path tracking/rendering (translucent purple dashed lines) when clicking a vehicle on the visualizer canvas.
+- **Ambulance Siren Visuals**: Enabled flashing blue sirens for dispatched emergency vehicles.
+- **Vampire/Tailgater Detection**: Highlights tailgating/vampire vehicles in bright crimson red when they follow the emergency vehicle close behind.
+
+### Changed
+- **Weaving Demon Visual Color**: Updated the Weaving Demon vehicle color on the canvas from lime green to a premium neon amber/gold gradient (`#fbbf24` to `#b45309`) and updated its dashboard text to match, providing clear visual separation from other subject vehicles and background vehicles.
+
 ## [1.7.0] - 2026-06-06
 ### Added
 - **Dynamic Road Network**: Users can now dynamically add (copy/insert) and delete horizontal and vertical roads from the Visualizer GUI.

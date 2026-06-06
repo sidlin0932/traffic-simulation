@@ -453,39 +453,6 @@ export default function TrafficSimSpec() {
       ctx.fillRect(vRoadX(c), PAD, getRoadWidthV(c), g.VLEN * C);
     }
 
-    // Draw road labels dynamically based on their actual tier
-    sim.hRoads.forEach((road, r) => {
-      if (road.tier === 'primary') {
-        ctx.fillStyle = "rgba(102, 252, 241, 0.55)";
-        ctx.font = "bold 9px 'Outfit', sans-serif";
-        ctx.fillText(`主要幹道 H${r} (Primary H${r})`, PAD + 10, hRoadY(r) - 4);
-      } else if (road.tier === 'secondary') {
-        ctx.fillStyle = "rgba(255, 255, 255, 0.4)";
-        ctx.font = "bold 8px 'Outfit', sans-serif";
-        ctx.fillText(`次要幹道 H${r} (Secondary H${r})`, PAD + 10, hRoadY(r) - 4);
-      }
-    });
-
-    sim.vRoads.forEach((road, c) => {
-      if (road.tier === 'primary') {
-        ctx.save();
-        ctx.fillStyle = "rgba(102, 252, 241, 0.55)";
-        ctx.font = "bold 9px 'Outfit', sans-serif";
-        ctx.translate(vRoadX(c) - 4, PAD + 50);
-        ctx.rotate(-Math.PI / 2);
-        ctx.fillText(`主要幹道 V${c} (Primary V${c})`, 0, 0);
-        ctx.restore();
-      } else if (road.tier === 'secondary') {
-        ctx.save();
-        ctx.fillStyle = "rgba(255, 255, 255, 0.4)";
-        ctx.font = "bold 8px 'Outfit', sans-serif";
-        ctx.translate(vRoadX(c) - 4, PAD + 50);
-        ctx.rotate(-Math.PI / 2);
-        ctx.fillText(`次要幹道 V${c} (Secondary V${c})`, 0, 0);
-        ctx.restore();
-      }
-    });
-
     // Draw Lane Dividers & ROC Markings
     ctx.lineWidth = 1;
 
@@ -845,6 +812,28 @@ export default function TrafficSimSpec() {
       }
     }
 
+    // Draw Inspected Vehicle Trajectory (History Path)
+    const inspectedCar = getTrackedVehicleDetails();
+    if (trackedVehicleId !== null && inspectedCar && inspectedCar.posProfile) {
+      ctx.beginPath();
+      ctx.strokeStyle = "rgba(192, 132, 252, 0.75)"; // Translucent Purple
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([2, 3]);
+      inspectedCar.posProfile.forEach((pt, idx) => {
+        const [t, pos, lane, roadType, roadIdx] = pt;
+        const { px, py } = getVehicleCoords(roadType, roadIdx, lane, pos, sim, null);
+        const cx = px + C / 2;
+        const cy = py + C / 2;
+        if (idx === 0) {
+          ctx.moveTo(cx, cy);
+        } else {
+          ctx.lineTo(cx, cy);
+        }
+      });
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
     // Draw Vehicles
     activeVehicles.forEach(car => {
       const roadType = car.roadType;
@@ -863,10 +852,7 @@ export default function TrafficSimSpec() {
 
       // Color Coding
       let grad = ctx.createLinearGradient(px, py, px + C, py + C);
-      if (car.type === 'subject') {
-        grad.addColorStop(0, "#e879f9");
-        grad.addColorStop(1, "#a21caf");
-      } else if (car.type === 'emergency') {
+      if (car.type === 'emergency') {
         grad.addColorStop(0, "#ffedd5");
         grad.addColorStop(1, "#ea580c");
         
@@ -877,7 +863,22 @@ export default function TrafficSimSpec() {
           ctx.arc(px + C/2, py - 2, 1.8, 0, Math.PI * 2);
           ctx.fill();
         }
+      } else if (car.isVampire) {
+        // Bright Crimson Red for Vampire/Tailgating vehicles
+        grad.addColorStop(0, "#ef4444");
+        grad.addColorStop(1, "#991b1b");
+      } else if (car.type === 'subject') {
+        if (expType === 'B1') {
+          // Bright Neon Amber/Gold for Weaving Demon (切車魔人)
+          grad.addColorStop(0, "#fbbf24");
+          grad.addColorStop(1, "#b45309");
+        } else {
+          // Pink/Magenta for other subject modes
+          grad.addColorStop(0, "#e879f9");
+          grad.addColorStop(1, "#a21caf");
+        }
       } else {
+        // Standard background cars (Cyan)
         grad.addColorStop(0, "#22d3ee");
         grad.addColorStop(1, "#0369a1");
       }
@@ -1044,7 +1045,7 @@ export default function TrafficSimSpec() {
               borderRadius: "6px",
               fontWeight: 500,
               marginLeft: "10px"
-            }}>v1.0.0</span>
+            }}>v1.7.1-hotfix-clearance</span>
           </h1>
           <p style={{ margin: 0, fontSize: "14px", color: theme.textMuted }}>
             基於雙車道元胞自動機 (CA) 研究空間尺度綠波協調及極端利己駕駛行為 (切車/尾隨)
@@ -1651,14 +1652,24 @@ export default function TrafficSimSpec() {
                   <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
                     <span style={{ width: "10px", height: "10px", borderRadius: "50%", background: "linear-gradient(to bottom, #22d3ee, #0369a1)" }}></span> 背景車
                   </span>
-                  {(expType === 'B1' || expType === 'B2') && (
+                  {expType === 'B1' && (
                     <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-                      <span style={{ width: "10px", height: "10px", borderRadius: "50%", background: "linear-gradient(to bottom, #e879f9, #a21caf)" }}></span> 主體車
+                      <span style={{ width: "10px", height: "10px", borderRadius: "50%", background: "linear-gradient(to bottom, #fbbf24, #b45309)" }}></span> 切車魔人
                     </span>
                   )}
                   {expType === 'B2' && (
+                    <>
+                      <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                        <span style={{ width: "10px", height: "10px", borderRadius: "50%", background: "linear-gradient(to bottom, #ef4444, #991b1b)" }}></span> 吸血鬼(尾隨車)
+                      </span>
+                      <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                        <span style={{ width: "10px", height: "10px", borderRadius: "50%", background: "linear-gradient(to bottom, #ffedd5, #ea580c)" }}></span> 救護車
+                      </span>
+                    </>
+                  )}
+                  {expType !== 'B1' && expType !== 'B2' && (
                     <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
-                      <span style={{ width: "10px", height: "10px", borderRadius: "50%", background: "linear-gradient(to bottom, #ffedd5, #ea580c)" }}></span> 救護車
+                      <span style={{ width: "10px", height: "10px", borderRadius: "50%", background: "linear-gradient(to bottom, #e879f9, #a21caf)" }}></span> 主體車
                     </span>
                   )}
                 </div>
@@ -1998,7 +2009,7 @@ export default function TrafficSimSpec() {
                   <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid #30363d", paddingBottom: "8px", fontSize: "13px" }}>
                     <span>對比指標</span>
                     <span style={{ width: "80px", textAlign: "right" }}>對照組 (常規)</span>
-                    <span style={{ width: "80px", textAlign: "right", color: theme.danger }}>切車魔人組</span>
+                    <span style={{ width: "80px", textAlign: "right", color: "#fbbf24" }}>切車魔人組</span>
                   </div>
                   {[
                     { label: "偵測到幽靈塞車次數", k: "phantom_jams_detected" },
@@ -2010,7 +2021,7 @@ export default function TrafficSimSpec() {
                       <span style={{ width: "80px", textAlign: "right", fontWeight: "bold" }}>
                         {bComparison.control.metrics[row.k]}
                       </span>
-                      <span style={{ width: "80px", textAlign: "right", color: theme.danger, fontWeight: "bold" }}>
+                      <span style={{ width: "80px", textAlign: "right", color: "#fbbf24", fontWeight: "bold" }}>
                         {bComparison.weaving.metrics[row.k]}
                       </span>
                     </div>
@@ -2019,8 +2030,8 @@ export default function TrafficSimSpec() {
                 <div style={{
                   marginTop: "16px",
                   padding: "10px",
-                  background: "rgba(252, 68, 69, 0.08)",
-                  border: "1px solid rgba(252, 68, 69, 0.2)",
+                  background: "rgba(251, 191, 36, 0.08)",
+                  border: "1px solid rgba(251, 191, 36, 0.2)",
                   borderRadius: "8px",
                   fontSize: "12px",
                   color: theme.text
