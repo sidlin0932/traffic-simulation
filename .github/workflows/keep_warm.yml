@@ -1,0 +1,19 @@
+name: Keep Render Alive
+
+on:
+  schedule:
+    # 這裡的 cron 設定每 14 分鐘執行一次以防止 Render 進入休眠 (15分鐘)
+    # 注意：GitHub 稍微延遲是正常的，如果想更保險可以調整為每 10-12 分鐘
+    - cron: '*/14 * * * *'
+  # 支援手動觸發測試
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Render Website
+        run: |
+          # 請在下方雙引號中填入您 Render 專案的實際網址
+          # 例如: curl -I "https://your-app-name.onrender.com"
+          curl -I "https://your-app-name.onrender.com"
