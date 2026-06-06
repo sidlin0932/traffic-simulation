@@ -41,6 +41,7 @@ export default function TrafficSimSpec() {
   const [deltaT, setDeltaT] = useState(30);
   const [pChangeBg, setPChangeBg] = useState(0.1);
   const [pChangeSub, setPChangeSub] = useState(1.0);
+  const [pChangeUrgent, setPChangeUrgent] = useState(0.9);
   const [turnProbability, setTurnProbability] = useState(0.15);
   const [isPlaying, setIsPlaying] = useState(false);
   const [simSpeed, setSimSpeed] = useState(100); // ms per tick
@@ -132,6 +133,7 @@ export default function TrafficSimSpec() {
             delta_t: deltaT,
             p_change_background: pChangeBg,
             p_change_subject: pChangeSub,
+            p_change_urgent: pChangeUrgent,
             turn_probability: turnProbability
           }
         });
@@ -259,6 +261,7 @@ export default function TrafficSimSpec() {
         delta_t: deltaT,
         p_change_background: pChangeBg,
         p_change_subject: pChangeSub,
+        p_change_urgent: pChangeUrgent,
         emergency_spawn_tick: 50,
         subject_spawn_tick: 70,
         turn_probability: turnProbability
@@ -537,6 +540,7 @@ export default function TrafficSimSpec() {
         if (parsed.deltaT !== undefined) setDeltaT(Number(parsed.deltaT));
         if (parsed.pChangeBg !== undefined) setPChangeBg(Number(parsed.pChangeBg));
         if (parsed.pChangeSub !== undefined) setPChangeSub(Number(parsed.pChangeSub));
+        if (parsed.pChangeUrgent !== undefined) setPChangeUrgent(Number(parsed.pChangeUrgent));
         if (parsed.turnProbability !== undefined) setTurnProbability(Number(parsed.turnProbability));
         if (parsed.signalMode !== undefined) setSignalMode(parsed.signalMode);
         if (parsed.hRoads !== undefined) setHRoads(parsed.hRoads);
@@ -565,7 +569,7 @@ export default function TrafficSimSpec() {
       if (animationRef.current) clearInterval(animationRef.current);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [segLength, expType, deltaT, pChangeBg, pChangeSub, seed, signalMode, turnProbability]);
+  }, [segLength, expType, deltaT, pChangeBg, pChangeSub, pChangeUrgent, seed, signalMode, turnProbability]);
 
   // Hot-patch inflow rates without reinit — keeps simulation running
   useEffect(() => {
@@ -1733,6 +1737,19 @@ export default function TrafficSimSpec() {
               </div>
 
               <div>
+                <label style={{ display: "block", fontSize: "12px", color: theme.textMuted, marginBottom: "4px" }}>轉彎變道急迫率 (P_urgent_change): {pChangeUrgent}</label>
+                <input
+                  type="range"
+                  min={0.0}
+                  max={1.0}
+                  step={0.05}
+                  value={pChangeUrgent}
+                  onChange={(e) => setPChangeUrgent(Number(e.target.value))}
+                  style={{ width: "100%", accentColor: theme.primary }}
+                />
+              </div>
+
+              <div>
                 <label style={{ display: "block", fontSize: "12px", color: theme.textMuted, marginBottom: "4px" }}>模擬速度: {simSpeed}ms/Tick</label>
                 <input
                   type="range"
@@ -2148,7 +2165,7 @@ export default function TrafficSimSpec() {
                   <button
                     onClick={() => {
                       const config = {
-                        seed, steps, density, densityHFwd, densityHBwd, deltaT, pChangeBg, pChangeSub,
+                        seed, steps, density, densityHFwd, densityHBwd, deltaT, pChangeBg, pChangeSub, pChangeUrgent,
                         turnProbability, signalMode, hRoads, vRoads, intersectionRules
                       };
                       setImportExportText(JSON.stringify(config, null, 2));
@@ -2482,7 +2499,7 @@ export default function TrafficSimSpec() {
                     <button
                       onClick={() => {
                         const config = {
-                          seed, steps, density, densityHFwd, densityHBwd, deltaT, pChangeBg, pChangeSub,
+                          seed, steps, density, densityHFwd, densityHBwd, deltaT, pChangeBg, pChangeSub, pChangeUrgent,
                           turnProbability, signalMode, hRoads, vRoads, intersectionRules
                         };
                         setImportExportText(JSON.stringify(config, null, 2));
