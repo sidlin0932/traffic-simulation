@@ -692,12 +692,13 @@ export class GridSimulation {
       }
 
       // Solid White Line constraint: no lane changing allowed in the solid line zone near intersections
+      // Also prevents changing lanes inside the intersection itself (dist === 0)
       let inSolidZone = false;
       const SOLID_LINE_ZONE_CELLS = 8;
       for (const p of intersections) {
         const actualP = (roadType === 'hBwd' || roadType === 'vBwd') ? mirror(p, maxLen) : p;
         const dist = actualP - x;
-        if (dist > 0 && dist <= SOLID_LINE_ZONE_CELLS) {
+        if (dist >= 0 && dist <= SOLID_LINE_ZONE_CELLS) {
           inSolidZone = true;
           break;
         }
@@ -720,6 +721,7 @@ export class GridSimulation {
 
         // Turn lane incentive: if approaching intersection, vehicle is motivated to move to the correct lane
         let incentive = dCurr < vDes && dTarget > dCurr;
+        let isTurnIncentive = false;
         if (approachingIntersection) {
           let nextInterIdx = -1;
           for (let i = 0; i < intersections.length; i++) {
@@ -737,6 +739,7 @@ export class GridSimulation {
           const targetAllows = targetRule === 'all' || targetRule === wants;
           if (!currAllows && targetAllows) {
             incentive = true;
+            isTurnIncentive = true;
           }
         }
 
@@ -744,7 +747,8 @@ export class GridSimulation {
         const safety = backInTarget === null || backInTarget.gap >= Math.max(backInTarget.vehicle.v, 2);
 
         if (incentive && safety) {
-          if (this.rng() < car.pChange) {
+          const prob = isTurnIncentive ? 0.9 : car.pChange;
+          if (this.rng() < prob) {
             laneChangesToExecute.push({ car, fromLane: currLane, toLane: targetLane, pos: x });
             break; // only change to one lane
           }
