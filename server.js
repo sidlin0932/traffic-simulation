@@ -24,6 +24,10 @@ app.post('/api/v1/simulation/run', (req, res) => {
       background_density = 0.15,
       experiment_type = 'custom',
       export_trajectories = false,
+      h_roads = null,
+      v_roads = null,
+      hRoads = null,
+      vRoads = null,
       params = {}
     } = req.body;
 
@@ -42,8 +46,8 @@ app.post('/api/v1/simulation/run', (req, res) => {
         experimentType: experiment_type,
         exportTrajectories: export_trajectories,
         signalMode: req.body.signal_mode || 'alternating',
-        revModeH: req.body.reversible_modes_h || ["none", "none", "none", "none", "none"],
-        revModeV: req.body.reversible_modes_v || ["none", "none", "none", "none", "none", "none"],
+        hRoads: h_roads || hRoads,
+        vRoads: v_roads || vRoads,
         params
       });
 

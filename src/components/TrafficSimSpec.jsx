@@ -27,6 +27,7 @@ export default function TrafficSimSpec() {
   const [segLength, setSegLength] = useState(20);
   const [densityHFwd, setDensityHFwd] = useState(0.12);
   const [densityHBwd, setDensityHBwd] = useState(0.12);
+  const [density, setDensity] = useState(0.15);
   const [steps, setSteps] = useState(800);
   const [expType, setExpType] = useState("B2"); // 'custom', 'A', 'B1', 'B2'
   const [deltaT, setDeltaT] = useState(30);
@@ -37,8 +38,21 @@ export default function TrafficSimSpec() {
   const [simSpeed, setSimSpeed] = useState(100); // ms per tick
 
   const [signalMode, setSignalMode] = useState("alternating");
-  const [revModeH, setRevModeH] = useState(["none", "none", "none", "none", "none"]);
-  const [revModeV, setRevModeV] = useState(["none", "none", "none", "none", "none", "none"]);
+  const [hRoads, setHRoads] = useState([
+    { tier: "minor",     inflowFwd: 0.08, inflowBwd: 0.08, revMode: "none" },
+    { tier: "primary",   inflowFwd: 0.12, inflowBwd: 0.12, revMode: "none" },
+    { tier: "secondary", inflowFwd: 0.12, inflowBwd: 0.12, revMode: "none" },
+    { tier: "primary",   inflowFwd: 0.12, inflowBwd: 0.12, revMode: "none" },
+    { tier: "minor",     inflowFwd: 0.08, inflowBwd: 0.08, revMode: "none" },
+  ]);
+  const [vRoads, setVRoads] = useState([
+    { tier: "minor",     inflowFwd: 0.08, inflowBwd: 0.08, revMode: "none" },
+    { tier: "primary",   inflowFwd: 0.12, inflowBwd: 0.12, revMode: "none" },
+    { tier: "minor",     inflowFwd: 0.08, inflowBwd: 0.08, revMode: "none" },
+    { tier: "secondary", inflowFwd: 0.12, inflowBwd: 0.12, revMode: "none" },
+    { tier: "primary",   inflowFwd: 0.12, inflowBwd: 0.12, revMode: "none" },
+    { tier: "minor",     inflowFwd: 0.08, inflowBwd: 0.08, revMode: "none" },
+  ]);
 
   // Dynamic Sim Instances
   const [sim, setSim] = useState(null);
@@ -75,15 +89,13 @@ export default function TrafficSimSpec() {
     // Create new simulation instance
     const s = new GridSimulation({
       seed: seed,
-      backgroundDensityHFwd: densityHFwd,
-      backgroundDensityHBwd: densityHBwd,
+      hRoads: hRoads,
+      vRoads: vRoads,
       simulationSteps: steps,
       experimentType: expType,
       exportTrajectories: true,
       segLength: segLength,
       signalMode: signalMode,
-      revModeH: revModeH,
-      revModeV: revModeV,
       params: {
         delta_t: deltaT,
         p_change_background: pChangeBg,
@@ -105,7 +117,7 @@ export default function TrafficSimSpec() {
     laneInterpolation.current.clear();
   };
 
-  const getVehicleCoords = (roadType, idx, lane, pos, currentSim) => {
+  const getVehicleCoords = (roadType, idx, lane, pos, currentSim, car = null) => {
     if (!currentSim) return { px: 0, py: 0 };
     const g = currentSim.g;
     const C = 6;
@@ -128,6 +140,76 @@ export default function TrafficSimSpec() {
 
     let px = 0;
     let py = 0;
+
+    if (roadType.startsWith("alley")) {
+      const isMeeting = car ? !!car.isMeeting : false;
+      const isFwd = idx === 0;
+
+      if (roadType === "alleyA" || roadType === "alleyC" || roadType === "alleyE") {
+        let y0 = 0;
+        let xStart = 0;
+        let xEnd = 0;
+
+        if (roadType === "alleyA") {
+          y0 = (hRoadY(0) + hRoadY(1)) / 2;
+          xStart = vRoadX(2);
+          xEnd = vRoadX(3) + getRoadWidthV(3);
+        } else if (roadType === "alleyC") {
+          y0 = (hRoadY(3) + hRoadY(4)) / 2;
+          xStart = vRoadX(4);
+          xEnd = vRoadX(5) + getRoadWidthV(5);
+        } else {
+          y0 = (hRoadY(2) + hRoadY(3)) / 2;
+          xStart = vRoadX(0);
+          xEnd = vRoadX(1) + getRoadWidthV(1);
+        }
+
+        const roadLen = xEnd - xStart;
+        const alleyObj = currentSim.alleys ? currentSim.alleys.find(a => a.id === roadType) : null;
+        const cells = alleyObj ? alleyObj.len : 15;
+
+        if (isFwd) {
+          px = xStart + pos * (roadLen - C) / Math.max(1, cells - 1);
+          py = isMeeting ? (y0 + C + LANE_GAP) : (y0 + (C + LANE_GAP) / 2 - C / 2);
+        } else {
+          px = xEnd - pos * (roadLen - C) / Math.max(1, cells - 1) - C;
+          py = isMeeting ? y0 : (y0 + (C + LANE_GAP) / 2 - C / 2);
+        }
+      } else {
+        // Vertical alleys: Alley B, D, F
+        let x0 = 0;
+        let yStart = 0;
+        let yEnd = 0;
+
+        if (roadType === "alleyB") {
+          x0 = (vRoadX(0) + vRoadX(1)) / 2;
+          yStart = hRoadY(1);
+          yEnd = hRoadY(2) + getRoadWidthH(2);
+        } else if (roadType === "alleyD") {
+          x0 = (vRoadX(3) + vRoadX(4)) / 2;
+          yStart = hRoadY(2);
+          yEnd = hRoadY(3) + getRoadWidthH(3);
+        } else {
+          x0 = (vRoadX(4) + vRoadX(5)) / 2;
+          yStart = hRoadY(0);
+          yEnd = hRoadY(1) + getRoadWidthH(1);
+        }
+
+        const roadLen = yEnd - yStart;
+        const alleyObj = currentSim.alleys ? currentSim.alleys.find(a => a.id === roadType) : null;
+        const cells = alleyObj ? alleyObj.len : 15;
+
+        if (isFwd) {
+          py = yStart + pos * (roadLen - C) / Math.max(1, cells - 1);
+          px = isMeeting ? x0 : (x0 + (C + LANE_GAP) / 2 - C / 2);
+        } else {
+          py = yEnd - pos * (roadLen - C) / Math.max(1, cells - 1) - C;
+          px = isMeeting ? (x0 + C + LANE_GAP) : (x0 + (C + LANE_GAP) / 2 - C / 2);
+        }
+      }
+
+      return { px, py };
+    }
 
     const bwdCountH = currentSim.hBwd[idx] ? currentSim.hBwd[idx].length : 3;
     const bwdCountV = currentSim.vBwd[idx] ? currentSim.vBwd[idx].length : 3;
@@ -259,7 +341,7 @@ export default function TrafficSimSpec() {
     return () => {
       if (animationRef.current) clearInterval(animationRef.current);
     };
-  }, [segLength, densityHFwd, densityHBwd, expType, deltaT, pChangeBg, pChangeSub, seed, signalMode, revModeH, revModeV, turnProbability]);
+  }, [segLength, expType, deltaT, pChangeBg, pChangeSub, seed, signalMode, turnProbability, hRoads, vRoads]);
 
   // Tick step of simulation
   const stepSimulation = () => {
@@ -357,28 +439,52 @@ export default function TrafficSimSpec() {
     const hRoadY = (r) => PAD + g.vInt[r] * C + C / 2 - getRoadWidthH(r) / 2;
     const vRoadX = (c) => PAD + g.hInt[c] * C + C / 2 - getRoadWidthV(c) / 2;
 
-    // Draw Roads (horizontal and vertical)
+    const isPrimaryH = (r) => r === 1 || r === 3;
+    const isPrimaryV = (c) => c === 1 || c === 4;
+    const isSecondaryH = (r) => r === 2;
+    const isSecondaryV = (c) => c === 3;
+
+    // Draw Roads (horizontal and vertical) in a single seamless asphalt color
+    ctx.fillStyle = "#181f2d";
     for (let r = 0; r < g.NUM_H; r++) {
-      const isArterial = r === 2;
-      ctx.fillStyle = isArterial ? "#212630" : "#141923";
       ctx.fillRect(PAD, hRoadY(r), g.HLEN * C, getRoadWidthH(r));
     }
     for (let c = 0; c < g.NUM_V; c++) {
-      const isArterial = c === 3;
-      ctx.fillStyle = isArterial ? "#212630" : "#141923";
       ctx.fillRect(vRoadX(c), PAD, getRoadWidthV(c), g.VLEN * C);
     }
 
-    // Draw road labels for Arterial Roads
-    ctx.fillStyle = "rgba(102, 252, 241, 0.45)"; // primary theme color with transparency
-    ctx.font = "bold 9px 'Outfit', sans-serif";
-    ctx.fillText("主要幹道 H2 (Arterial H2)", PAD + 10, hRoadY(2) - 4);
+    // Draw road labels dynamically based on their actual tier
+    sim.hRoads.forEach((road, r) => {
+      if (road.tier === 'primary') {
+        ctx.fillStyle = "rgba(102, 252, 241, 0.55)";
+        ctx.font = "bold 9px 'Outfit', sans-serif";
+        ctx.fillText(`主要幹道 H${r} (Primary H${r})`, PAD + 10, hRoadY(r) - 4);
+      } else if (road.tier === 'secondary') {
+        ctx.fillStyle = "rgba(255, 255, 255, 0.4)";
+        ctx.font = "bold 8px 'Outfit', sans-serif";
+        ctx.fillText(`次要幹道 H${r} (Secondary H${r})`, PAD + 10, hRoadY(r) - 4);
+      }
+    });
 
-    ctx.save();
-    ctx.translate(vRoadX(3) - 4, PAD + 50);
-    ctx.rotate(-Math.PI / 2);
-    ctx.fillText("主要幹道 V3 (Arterial V3)", 0, 0);
-    ctx.restore();
+    sim.vRoads.forEach((road, c) => {
+      if (road.tier === 'primary') {
+        ctx.save();
+        ctx.fillStyle = "rgba(102, 252, 241, 0.55)";
+        ctx.font = "bold 9px 'Outfit', sans-serif";
+        ctx.translate(vRoadX(c) - 4, PAD + 50);
+        ctx.rotate(-Math.PI / 2);
+        ctx.fillText(`主要幹道 V${c} (Primary V${c})`, 0, 0);
+        ctx.restore();
+      } else if (road.tier === 'secondary') {
+        ctx.save();
+        ctx.fillStyle = "rgba(255, 255, 255, 0.4)";
+        ctx.font = "bold 8px 'Outfit', sans-serif";
+        ctx.translate(vRoadX(c) - 4, PAD + 50);
+        ctx.rotate(-Math.PI / 2);
+        ctx.fillText(`次要幹道 V${c} (Secondary V${c})`, 0, 0);
+        ctx.restore();
+      }
+    });
 
     // Draw Lane Dividers & ROC Markings
     ctx.lineWidth = 1;
@@ -438,25 +544,45 @@ export default function TrafficSimSpec() {
       ctx.lineWidth = lineWidth;
       ctx.setLineDash(lineDash);
       
+      const getAlleySkipsH = (r) => {
+        return [];
+      };
+
+      const drawSegment = (x1, x2) => {
+        const skips = getAlleySkipsH(r);
+        let currX = x1;
+        for (let skip of skips) {
+          if (skip.x >= currX && skip.x < x2) {
+            if (currX < skip.x) {
+              ctx.beginPath();
+              ctx.moveTo(currX, y);
+              ctx.lineTo(skip.x, y);
+              ctx.stroke();
+            }
+            currX = skip.x + skip.w;
+          }
+        }
+        if (currX < x2) {
+          ctx.beginPath();
+          ctx.moveTo(currX, y);
+          ctx.lineTo(x2, y);
+          ctx.stroke();
+        }
+      };
+
       let currentX = PAD;
       for (let c = 0; c < g.NUM_V; c++) {
         const xStart = vRoadX(c);
         const isPresent = g.present[r][c];
         if (isPresent) {
           if (currentX < xStart) {
-            ctx.beginPath();
-            ctx.moveTo(currentX, y);
-            ctx.lineTo(xStart, y);
-            ctx.stroke();
+            drawSegment(currentX, xStart);
           }
           currentX = xStart + getRoadWidthV(c);
         }
       }
       if (currentX < PAD + g.HLEN * C) {
-        ctx.beginPath();
-        ctx.moveTo(currentX, y);
-        ctx.lineTo(PAD + g.HLEN * C, y);
-        ctx.stroke();
+        drawSegment(currentX, PAD + g.HLEN * C);
       }
       ctx.setLineDash([]);
     };
@@ -467,25 +593,45 @@ export default function TrafficSimSpec() {
       ctx.lineWidth = lineWidth;
       ctx.setLineDash(lineDash);
       
+      const getAlleySkipsV = (c) => {
+        return [];
+      };
+
+      const drawSegment = (y1, y2) => {
+        const skips = getAlleySkipsV(c);
+        let currY = y1;
+        for (let skip of skips) {
+          if (skip.y >= currY && skip.y < y2) {
+            if (currY < skip.y) {
+              ctx.beginPath();
+              ctx.moveTo(x, currY);
+              ctx.lineTo(x, skip.y);
+              ctx.stroke();
+            }
+            currY = skip.y + skip.h;
+          }
+        }
+        if (currY < y2) {
+          ctx.beginPath();
+          ctx.moveTo(x, currY);
+          ctx.lineTo(x, y2);
+          ctx.stroke();
+        }
+      };
+
       let currentY = PAD;
       for (let r = 0; r < g.NUM_H; r++) {
         const yStart = hRoadY(r);
         const isPresent = g.present[r][c];
         if (isPresent) {
           if (currentY < yStart) {
-            ctx.beginPath();
-            ctx.moveTo(x, currentY);
-            ctx.lineTo(x, yStart);
-            ctx.stroke();
+            drawSegment(currentY, yStart);
           }
           currentY = yStart + getRoadWidthH(r);
         }
       }
       if (currentY < PAD + g.VLEN * C) {
-        ctx.beginPath();
-        ctx.moveTo(x, currentY);
-        ctx.lineTo(x, PAD + g.VLEN * C);
-        ctx.stroke();
+        drawSegment(currentY, PAD + g.VLEN * C);
       }
       ctx.setLineDash([]);
     };
@@ -502,8 +648,8 @@ export default function TrafficSimSpec() {
         drawHorizontalLineInSegments(r, boundaryY - 1, "#eab308", 1, []);
         drawHorizontalLineInSegments(r, boundaryY + 1, "#eab308", 1, []);
       } else {
-        drawHorizontalLineInSegments(r, boundaryY - 1, "#ffffff", 1, [4, 4]);
-        drawHorizontalLineInSegments(r, boundaryY + 1, "#ffffff", 1, [4, 4]);
+        drawHorizontalLineInSegments(r, boundaryY - 1, "#eab308", 1, [4, 4]);
+        drawHorizontalLineInSegments(r, boundaryY + 1, "#eab308", 1, [4, 4]);
       }
 
       // 2. Draw lane lines (white dashed, turning solid near intersections)
@@ -589,8 +735,8 @@ export default function TrafficSimSpec() {
         drawVerticalLineInSegments(c, boundaryX - 1, "#eab308", 1, []);
         drawVerticalLineInSegments(c, boundaryX + 1, "#eab308", 1, []);
       } else {
-        drawVerticalLineInSegments(c, boundaryX - 1, "#ffffff", 1, [4, 4]);
-        drawVerticalLineInSegments(c, boundaryX + 1, "#ffffff", 1, [4, 4]);
+        drawVerticalLineInSegments(c, boundaryX - 1, "#eab308", 1, [4, 4]);
+        drawVerticalLineInSegments(c, boundaryX + 1, "#eab308", 1, [4, 4]);
       }
 
       // 2. Draw lane lines
@@ -706,7 +852,7 @@ export default function TrafficSimSpec() {
       const lane = car.lane;
       const pos = car.pos;
 
-      const { px, py } = getVehicleCoords(roadType, idx, lane, pos, sim);
+      const { px, py } = getVehicleCoords(roadType, idx, lane, pos, sim, car);
 
       // Highlight tracked car
       if (trackedVehicleId === car.id) {
@@ -776,7 +922,7 @@ export default function TrafficSimSpec() {
     let minDist = 15; // Max click distance 15px
 
     activeVehicles.forEach(car => {
-      const { px, py } = getVehicleCoords(car.roadType, car.roadIdx, car.lane, car.pos, sim);
+      const { px, py } = getVehicleCoords(car.roadType, car.roadIdx, car.lane, car.pos, sim, car);
 
       const dist = Math.sqrt((x - px) ** 2 + (y - py) ** 2);
       if (dist < minDist) {
@@ -797,7 +943,7 @@ export default function TrafficSimSpec() {
     setIsSweeping(true);
     // Let UI render loading state
     setTimeout(() => {
-      const res = runExperimentASweep(seed, deltaT, (densityHFwd + densityHBwd) / 2);
+      const res = runExperimentASweep(seed, deltaT, density);
       setSweepData(res.sweep);
       setBestL(res.best_road_length);
       setCalcCruiseSpeed(res.calculated_cruise_speed);
@@ -813,44 +959,33 @@ export default function TrafficSimSpec() {
       // 1. Control Run (Background only, P_change = 0.1)
       const simCtrl = new GridSimulation({
         simulationSteps: 800,
-        backgroundDensityHFwd: densityHFwd,
-        backgroundDensityHBwd: densityHBwd,
+        hRoads: hRoads,
+        vRoads: vRoads,
         seed: seed,
         experimentType: 'custom',
-        params: {
-          p_change_background: 0.1,
-        }
+        params: { p_change_background: 0.1 }
       });
       const resCtrl = simCtrl.run();
 
       // 2. Weaving Scenario (Subject weaving, P_change = 1.0)
       const simWeave = new GridSimulation({
         simulationSteps: 800,
-        backgroundDensityHFwd: densityHFwd,
-        backgroundDensityHBwd: densityHBwd,
+        hRoads: hRoads,
+        vRoads: vRoads,
         seed: seed,
         experimentType: 'B1',
-        params: {
-          p_change_background: 0.1,
-          p_change_subject: 1.0,
-          subject_spawn_tick: 70
-        }
+        params: { p_change_background: 0.1, p_change_subject: 1.0, subject_spawn_tick: 70 }
       });
       const resWeave = simWeave.run();
 
       // 3. Tailgating Scenario (Subject tailgating emergency vehicle)
       const simTailgate = new GridSimulation({
         simulationSteps: 800,
-        backgroundDensityHFwd: densityHFwd,
-        backgroundDensityHBwd: densityHBwd,
+        hRoads: hRoads,
+        vRoads: vRoads,
         seed: seed,
         experimentType: 'B2',
-        params: {
-          p_change_background: 0.1,
-          p_change_subject: 1.0,
-          emergency_spawn_tick: 50,
-          subject_spawn_tick: 70
-        }
+        params: { p_change_background: 0.1, p_change_subject: 1.0, emergency_spawn_tick: 50, subject_spawn_tick: 70 }
       });
       const resTailgate = simTailgate.run();
 
@@ -877,8 +1012,9 @@ export default function TrafficSimSpec() {
       fontFamily: "'Outfit', 'Inter', sans-serif",
       color: theme.text,
       background: theme.bg,
-      padding: "24px",
-      minHeight: "100vh"
+      padding: "12px",
+      minHeight: "100vh",
+      boxSizing: "border-box",
     }}>
       {/* Header Panel */}
       <div style={{
@@ -952,14 +1088,18 @@ export default function TrafficSimSpec() {
 
       {/* Tab Content - Visualizer */}
       {activeTab === "visualizer" && (
-        <div style={{ display: "grid", gridTemplateColumns: "300px 1fr", gap: "20px" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "420px 1fr", gap: "16px" }}>
           {/* Controls Config */}
           <div style={{
             background: "rgba(31, 40, 51, 0.45)",
             border: "1px solid rgba(255,255,255,0.06)",
-            borderRadius: "16px",
-            padding: "20px",
-            height: "fit-content"
+            borderRadius: "12px",
+            padding: "16px",
+            position: "sticky",
+            top: "16px",
+            maxHeight: "calc(100vh - 32px)",
+            overflowY: "auto",
+            overflowX: "hidden",
           }}>
             <h3 style={{ margin: "0 0 16px 0", color: theme.textLight, fontSize: "16px" }}>參數配置</h3>
             
@@ -995,31 +1135,7 @@ export default function TrafficSimSpec() {
                 />
               </div>
 
-              <div>
-                <label style={{ display: "block", fontSize: "12px", color: theme.textMuted, marginBottom: "4px" }}>東向車流密度 (Eastbound): {(densityHFwd * 100).toFixed(0)}%</label>
-                <input
-                  type="range"
-                  min={0.05}
-                  max={0.3}
-                  step={0.01}
-                  value={densityHFwd}
-                  onChange={(e) => setDensityHFwd(Number(e.target.value))}
-                  style={{ width: "100%", accentColor: theme.primary }}
-                />
-              </div>
 
-              <div>
-                <label style={{ display: "block", fontSize: "12px", color: theme.textMuted, marginBottom: "4px" }}>西向車流密度 (Westbound): {(densityHBwd * 100).toFixed(0)}%</label>
-                <input
-                  type="range"
-                  min={0.05}
-                  max={0.3}
-                  step={0.01}
-                  value={densityHBwd}
-                  onChange={(e) => setDensityHBwd(Number(e.target.value))}
-                  style={{ width: "100%", accentColor: theme.primary }}
-                />
-              </div>
 
               <div>
                 <label style={{ display: "block", fontSize: "12px", color: theme.textMuted, marginBottom: "4px" }}>路口轉彎機率: {(turnProbability * 100).toFixed(0)}%</label>
@@ -1125,31 +1241,361 @@ export default function TrafficSimSpec() {
                 </select>
               </div>
 
-              <div>
-                <label style={{ display: "block", fontSize: "12px", color: theme.textMuted, marginBottom: "4px" }}>調撥車道設定 (主要幹道 H2)</label>
-                <select
-                  value={revModeH[2]}
-                  onChange={(e) => {
-                    const newRev = [...revModeH];
-                    newRev[2] = e.target.value;
-                    setRevModeH(newRev);
+
+              {/* ─── 道路個別設定 Matrix ─── */}
+              <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", marginTop: "8px", paddingTop: "14px" }}>
+                <div style={{ fontSize: "11px", fontWeight: 700, color: theme.primary, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: "8px" }}>
+                  道路個別設定 (Per-Road Config)
+                </div>
+
+                {/* Column headers */}
+                <div style={{
+                  display: "grid",
+                  gridTemplateColumns: "36px minmax(0,1.2fr) minmax(0,1.2fr) 60px 60px 42px",
+                  gap: "4px",
+                  alignItems: "center",
+                  marginBottom: "4px",
+                  padding: "0 4px",
+                }}>
+                  <span style={{ fontSize: "9px", color: theme.textMuted, textTransform: "uppercase" }}>道路</span>
+                  <span style={{ fontSize: "9px", color: "#67e8f9", textTransform: "uppercase" }}>正向 →↓</span>
+                  <span style={{ fontSize: "9px", color: "#f9a8d4", textTransform: "uppercase" }}>反向 ←↑</span>
+                  <span style={{ fontSize: "9px", color: theme.textMuted, textTransform: "uppercase" }}>等級</span>
+                  <span style={{ fontSize: "9px", color: theme.textMuted, textTransform: "uppercase" }}>調撥</span>
+                  <span style={{ fontSize: "9px", color: theme.textMuted, textTransform: "uppercase", textAlign: "right" }}>操作</span>
+                </div>
+
+                {/* Separator */}
+                <div style={{ borderBottom: "1px solid rgba(255,255,255,0.06)", marginBottom: "6px" }} />
+
+                {/* Horizontal Roads */}
+                <div style={{ fontSize: "10px", fontWeight: "bold", color: theme.textLight, padding: "2px 4px", marginBottom: "4px" }}>水平道路 (Horizontal Roads)</div>
+                {hRoads.map((road, idx) => {
+                  const inflowFwd = road.inflowFwd;
+                  const inflowBwd = road.inflowBwd;
+                  const revMode   = road.revMode;
+                  const isPrimary = road.tier === "primary";
+                  const isSecondary = road.tier === "secondary";
+                  const canReverse = isPrimary || isSecondary;
+                  const tierColor  = isPrimary ? theme.primary : isSecondary ? "#a78bfa" : theme.textMuted;
+                  const baseLabel  = isPrimary ? "3+3" : isSecondary ? "2+2" : "1+1";
+                  const fwdPeak    = isPrimary ? "4+2" : isSecondary ? "3+1" : null;
+                  const bwdPeak    = isPrimary ? "2+4" : isSecondary ? "1+3" : null;
+                  const ic = (v) => v > 0.5 ? "#f87171" : v > 0.3 ? "#fbbf24" : theme.primary;
+
+                  return (
+                    <div key={`h-${idx}`} style={{
+                      display: "grid",
+                      gridTemplateColumns: "36px minmax(0,1.2fr) minmax(0,1.2fr) 60px 60px 42px",
+                      gap: "4px",
+                      alignItems: "center",
+                      padding: "3px 4px",
+                      borderRadius: "4px",
+                      background: canReverse ? "rgba(102,252,241,0.03)" : "transparent",
+                      marginBottom: "2px",
+                    }}>
+                      <span style={{ fontSize: "10px", fontWeight: 600, color: tierColor }}>H{idx}</span>
+
+                      {/* Fwd slider */}
+                      <div style={{ display: "flex", alignItems: "center", gap: "2px" }}>
+                        <input
+                          type="range" min={0} max={1.0} step={0.02}
+                          value={inflowFwd}
+                          onChange={(e) => {
+                            const v = Number(e.target.value);
+                            const copy = [...hRoads];
+                            copy[idx] = { ...copy[idx], inflowFwd: v };
+                            setHRoads(copy);
+                          }}
+                          style={{ flex: 1, accentColor: ic(inflowFwd), height: "2px" }}
+                        />
+                        <span style={{ fontSize: "8px", color: ic(inflowFwd), fontWeight: 700, minWidth: "16px", textAlign: "right" }}>
+                          {(inflowFwd * 100).toFixed(0)}
+                        </span>
+                      </div>
+
+                      {/* Bwd slider */}
+                      <div style={{ display: "flex", alignItems: "center", gap: "2px" }}>
+                        <input
+                          type="range" min={0} max={1.0} step={0.02}
+                          value={inflowBwd}
+                          onChange={(e) => {
+                            const v = Number(e.target.value);
+                            const copy = [...hRoads];
+                            copy[idx] = { ...copy[idx], inflowBwd: v };
+                            setHRoads(copy);
+                          }}
+                          style={{ flex: 1, accentColor: ic(inflowBwd), height: "2px" }}
+                        />
+                        <span style={{ fontSize: "8px", color: ic(inflowBwd), fontWeight: 700, minWidth: "16px", textAlign: "right" }}>
+                          {(inflowBwd * 100).toFixed(0)}
+                        </span>
+                      </div>
+
+                      {/* Tier Selector */}
+                      <select
+                        value={road.tier}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          const copy = [...hRoads];
+                          copy[idx] = { ...copy[idx], tier: val, revMode: val === "minor" ? "none" : copy[idx].revMode };
+                          setHRoads(copy);
+                        }}
+                        style={{
+                          background: "#0d1117", border: "1px solid #30363d", color: "#fff",
+                          padding: "1px 2px", borderRadius: "3px", fontSize: "8px", cursor: "pointer",
+                        }}
+                      >
+                        <option value="minor">一般</option>
+                        <option value="secondary">次要</option>
+                        <option value="primary">主要</option>
+                      </select>
+
+                      {/* Rev-mode dropdown */}
+                      {canReverse ? (
+                        <select
+                          value={revMode}
+                          onChange={(e) => {
+                            const copy = [...hRoads];
+                            copy[idx] = { ...copy[idx], revMode: e.target.value };
+                            setHRoads(copy);
+                          }}
+                          style={{
+                            width: "100%", background: "#0d1117",
+                            border: "1px solid #30363d", color: tierColor,
+                            padding: "1px 2px", borderRadius: "3px",
+                            cursor: "pointer", fontSize: "8px", fontWeight: 600,
+                          }}
+                        >
+                          <option value="none">{baseLabel}</option>
+                          <option value="peak_fwd">→ {fwdPeak}</option>
+                          <option value="peak_bwd">← {bwdPeak}</option>
+                        </select>
+                      ) : (
+                        <span style={{ fontSize: "8px", color: theme.textMuted, textAlign: "center" }}>—</span>
+                      )}
+
+                      {/* Actions */}
+                      <div style={{ display: "flex", gap: "2px", justifyContent: "flex-end" }}>
+                        <button
+                          title="複製插入下方"
+                          onClick={() => {
+                            const copy = [...hRoads];
+                            copy.splice(idx + 1, 0, { ...road });
+                            setHRoads(copy);
+                          }}
+                          style={{
+                            background: "rgba(102,252,241,0.1)", color: theme.primary, border: "none",
+                            borderRadius: "3px", width: "16px", height: "16px", fontSize: "10px",
+                            cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center"
+                          }}
+                        >
+                          +
+                        </button>
+                        <button
+                          title="刪除道路"
+                          disabled={hRoads.length <= 1}
+                          onClick={() => {
+                            const copy = [...hRoads];
+                            copy.splice(idx, 1);
+                            setHRoads(copy);
+                          }}
+                          style={{
+                            background: hRoads.length <= 1 ? "rgba(255,255,255,0.05)" : "rgba(252,68,69,0.1)",
+                            color: hRoads.length <= 1 ? theme.textMuted : theme.danger, border: "none",
+                            borderRadius: "3px", width: "16px", height: "16px", fontSize: "10px",
+                            cursor: hRoads.length <= 1 ? "not-allowed" : "pointer", display: "flex", alignItems: "center", justifyContent: "center"
+                          }}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+
+                <button
+                  onClick={() => {
+                    const copy = [...hRoads];
+                    copy.push({ tier: "minor", inflowFwd: 0.08, inflowBwd: 0.08, revMode: "none" });
+                    setHRoads(copy);
                   }}
                   style={{
-                    width: "100%",
-                    background: "#161b22",
-                    border: "1px solid #30363d",
-                    color: "#fff",
-                    padding: "8px",
-                    borderRadius: "6px",
-                    cursor: "pointer"
+                    background: "rgba(102,252,241,0.08)", border: "1px dashed rgba(102,252,241,0.25)",
+                    color: theme.primary, padding: "4px 8px", borderRadius: "6px", fontSize: "9px",
+                    fontWeight: "bold", cursor: "pointer", marginTop: "4px", width: "100%", transition: "all 0.2s",
+                    marginBottom: "12px"
                   }}
                 >
-                  <option value="none">常態配置 (3+3 雙黃實線)</option>
-                  <option value="peak_fwd">東向尖峰 (4+2 雙白虛線)</option>
-                  <option value="peak_bwd">西向尖峰 (2+4 雙白虛線)</option>
-                </select>
+                  ＋ 新增 H 路 (Add Horizontal Road)
+                </button>
+
+                <div style={{ borderBottom: "1px solid rgba(255,255,255,0.06)", marginBottom: "6px" }} />
+
+                {/* Vertical Roads */}
+                <div style={{ fontSize: "10px", fontWeight: "bold", color: theme.textLight, padding: "2px 4px", marginBottom: "4px" }}>垂直道路 (Vertical Roads)</div>
+                {vRoads.map((road, idx) => {
+                  const inflowFwd = road.inflowFwd;
+                  const inflowBwd = road.inflowBwd;
+                  const revMode   = road.revMode;
+                  const isPrimary = road.tier === "primary";
+                  const isSecondary = road.tier === "secondary";
+                  const canReverse = isPrimary || isSecondary;
+                  const tierColor  = isPrimary ? theme.primary : isSecondary ? "#a78bfa" : theme.textMuted;
+                  const baseLabel  = isPrimary ? "3+3" : isSecondary ? "2+2" : "1+1";
+                  const fwdPeak    = isPrimary ? "4+2" : isSecondary ? "3+1" : null;
+                  const bwdPeak    = isPrimary ? "2+4" : isSecondary ? "1+3" : null;
+                  const ic = (v) => v > 0.5 ? "#f87171" : v > 0.3 ? "#fbbf24" : theme.primary;
+
+                  return (
+                    <div key={`v-${idx}`} style={{
+                      display: "grid",
+                      gridTemplateColumns: "36px minmax(0,1.2fr) minmax(0,1.2fr) 60px 60px 42px",
+                      gap: "4px",
+                      alignItems: "center",
+                      padding: "3px 4px",
+                      borderRadius: "4px",
+                      background: canReverse ? "rgba(102,252,241,0.03)" : "transparent",
+                      marginBottom: "2px",
+                    }}>
+                      <span style={{ fontSize: "10px", fontWeight: 600, color: tierColor }}>V{idx}</span>
+
+                      {/* Fwd slider */}
+                      <div style={{ display: "flex", alignItems: "center", gap: "2px" }}>
+                        <input
+                          type="range" min={0} max={1.0} step={0.02}
+                          value={inflowFwd}
+                          onChange={(e) => {
+                            const v = Number(e.target.value);
+                            const copy = [...vRoads];
+                            copy[idx] = { ...copy[idx], inflowFwd: v };
+                            setVRoads(copy);
+                          }}
+                          style={{ flex: 1, accentColor: ic(inflowFwd), height: "2px" }}
+                        />
+                        <span style={{ fontSize: "8px", color: ic(inflowFwd), fontWeight: 700, minWidth: "16px", textAlign: "right" }}>
+                          {(inflowFwd * 100).toFixed(0)}
+                        </span>
+                      </div>
+
+                      {/* Bwd slider */}
+                      <div style={{ display: "flex", alignItems: "center", gap: "2px" }}>
+                        <input
+                          type="range" min={0} max={1.0} step={0.02}
+                          value={inflowBwd}
+                          onChange={(e) => {
+                            const v = Number(e.target.value);
+                            const copy = [...vRoads];
+                            copy[idx] = { ...copy[idx], inflowBwd: v };
+                            setVRoads(copy);
+                          }}
+                          style={{ flex: 1, accentColor: ic(inflowBwd), height: "2px" }}
+                        />
+                        <span style={{ fontSize: "8px", color: ic(inflowBwd), fontWeight: 700, minWidth: "16px", textAlign: "right" }}>
+                          {(inflowBwd * 100).toFixed(0)}
+                        </span>
+                      </div>
+
+                      {/* Tier Selector */}
+                      <select
+                        value={road.tier}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          const copy = [...vRoads];
+                          copy[idx] = { ...copy[idx], tier: val, revMode: val === "minor" ? "none" : copy[idx].revMode };
+                          setVRoads(copy);
+                        }}
+                        style={{
+                          background: "#0d1117", border: "1px solid #30363d", color: "#fff",
+                          padding: "1px 2px", borderRadius: "3px", fontSize: "8px", cursor: "pointer",
+                        }}
+                      >
+                        <option value="minor">一般</option>
+                        <option value="secondary">次要</option>
+                        <option value="primary">主要</option>
+                      </select>
+
+                      {/* Rev-mode dropdown */}
+                      {canReverse ? (
+                        <select
+                          value={revMode}
+                          onChange={(e) => {
+                            const copy = [...vRoads];
+                            copy[idx] = { ...copy[idx], revMode: e.target.value };
+                            setVRoads(copy);
+                          }}
+                          style={{
+                            width: "100%", background: "#0d1117",
+                            border: "1px solid #30363d", color: tierColor,
+                            padding: "1px 2px", borderRadius: "3px",
+                            cursor: "pointer", fontSize: "8px", fontWeight: 600,
+                          }}
+                        >
+                          <option value="none">{baseLabel}</option>
+                          <option value="peak_fwd">↓ {fwdPeak}</option>
+                          <option value="peak_bwd">↑ {bwdPeak}</option>
+                        </select>
+                      ) : (
+                        <span style={{ fontSize: "8px", color: theme.textMuted, textAlign: "center" }}>—</span>
+                      )}
+
+                      {/* Actions */}
+                      <div style={{ display: "flex", gap: "2px", justifyContent: "flex-end" }}>
+                        <button
+                          title="複製插入下方"
+                          onClick={() => {
+                            const copy = [...vRoads];
+                            copy.splice(idx + 1, 0, { ...road });
+                            setVRoads(copy);
+                          }}
+                          style={{
+                            background: "rgba(102,252,241,0.1)", color: theme.primary, border: "none",
+                            borderRadius: "3px", width: "16px", height: "16px", fontSize: "10px",
+                            cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center"
+                          }}
+                        >
+                          +
+                        </button>
+                        <button
+                          title="刪除道路"
+                          disabled={vRoads.length <= 1}
+                          onClick={() => {
+                            const copy = [...vRoads];
+                            copy.splice(idx, 1);
+                            setVRoads(copy);
+                          }}
+                          style={{
+                            background: vRoads.length <= 1 ? "rgba(255,255,255,0.05)" : "rgba(252,68,69,0.1)",
+                            color: vRoads.length <= 1 ? theme.textMuted : theme.danger, border: "none",
+                            borderRadius: "3px", width: "16px", height: "16px", fontSize: "10px",
+                            cursor: vRoads.length <= 1 ? "not-allowed" : "pointer", display: "flex", alignItems: "center", justifyContent: "center"
+                          }}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+
+                <button
+                  onClick={() => {
+                    const copy = [...vRoads];
+                    copy.push({ tier: "minor", inflowFwd: 0.08, inflowBwd: 0.08, revMode: "none" });
+                    setVRoads(copy);
+                  }}
+                  style={{
+                    background: "rgba(102,252,241,0.08)", border: "1px dashed rgba(102,252,241,0.25)",
+                    color: theme.primary, padding: "4px 8px", borderRadius: "6px", fontSize: "9px",
+                    fontWeight: "bold", cursor: "pointer", marginTop: "4px", width: "100%", transition: "all 0.2s",
+                    marginBottom: "4px"
+                  }}
+                >
+                  ＋ 新增 V 路 (Add Vertical Road)
+                </button>
               </div>
             </div>
+
 
             <hr style={{ borderColor: "rgba(255,255,255,0.06)", margin: "20px 0" }} />
 

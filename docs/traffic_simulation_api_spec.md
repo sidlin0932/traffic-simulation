@@ -30,6 +30,21 @@ This document defines the standard API specifications, parameters, schemas, and 
   "signal_mode": "alternating",
   "reversible_modes_h": ["none", "none", "none", "none", "none"],
   "reversible_modes_v": ["none", "none", "none", "none", "none", "none"],
+  "h_roads": [
+    { "tier": "minor", "inflowFwd": 0.08, "inflowBwd": 0.08, "revMode": "none" },
+    { "tier": "primary", "inflowFwd": 0.12, "inflowBwd": 0.12, "revMode": "none" },
+    { "tier": "secondary", "inflowFwd": 0.12, "inflowBwd": 0.12, "revMode": "none" },
+    { "tier": "primary", "inflowFwd": 0.12, "inflowBwd": 0.12, "revMode": "none" },
+    { "tier": "minor", "inflowFwd": 0.08, "inflowBwd": 0.08, "revMode": "none" }
+  ],
+  "v_roads": [
+    { "tier": "minor", "inflowFwd": 0.08, "inflowBwd": 0.08, "revMode": "none" },
+    { "tier": "primary", "inflowFwd": 0.12, "inflowBwd": 0.12, "revMode": "none" },
+    { "tier": "minor", "inflowFwd": 0.08, "inflowBwd": 0.08, "revMode": "none" },
+    { "tier": "secondary", "inflowFwd": 0.12, "inflowBwd": 0.12, "revMode": "none" },
+    { "tier": "primary", "inflowFwd": 0.12, "inflowBwd": 0.12, "revMode": "none" },
+    { "tier": "minor", "inflowFwd": 0.08, "inflowBwd": 0.08, "revMode": "none" }
+  ],
   "params": {
     "delta_t": 30,
     "seg_len": 20,

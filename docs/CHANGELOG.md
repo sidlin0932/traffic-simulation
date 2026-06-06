@@ -4,6 +4,16 @@ All notable changes to the **Taipei Grid Microscopic Traffic Simulation System**
 
 ---
 
+## [1.7.0] - 2026-06-06
+### Added
+- **Dynamic Road Network**: Users can now dynamically add (copy/insert) and delete horizontal and vertical roads from the Visualizer GUI.
+- **Road Tier Configuration**: Added a tier selector for each road row (主要幹道 / 次要幹道 / 一般道路) dynamically controlling lanes and speed limits.
+- **API Server Upgrade**: Upgraded `server.js` (`POST /api/v1/simulation/run`) to accept dynamic `h_roads` / `v_roads` parameters, making it fully compatible with custom road networks.
+
+### Changed
+- **Reversible Lane Line Color**: Replaced the double white dashed lines (雙白虛) of the reversible lanes (調撥車道) with double yellow dashed lines (雙黃虛) on the canvas.
+- **Alleys Removed**: Removed all 6 hardcoded alleys and their rendering logic, producing a clean, standard urban grid.
+
 ## [1.6.0] - 2026-06-05
 ### Added
 - **Right-Hand Traffic (RHT) Navigation**: Complete coordinate correction for RHT (Taiwan standard) in both horizontal and vertical directions (Southbound on the left half of the vertical street, Northbound on the right half).
