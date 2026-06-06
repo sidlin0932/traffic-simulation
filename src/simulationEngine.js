@@ -107,6 +107,8 @@ export class GridSimulation {
     this.experimentType = config.experimentType || 'custom'; // 'A', 'B1', 'B2', 'custom'
     this.exportTrajectories = !!config.exportTrajectories;
     this.bgDensity = config.backgroundDensity != null ? config.backgroundDensity : 0.15;
+    this.bgDensityHFwd = config.backgroundDensityHFwd != null ? config.backgroundDensityHFwd : (config.background_density_eastbound != null ? config.background_density_eastbound : (config.backgroundDensity != null ? config.backgroundDensity : 0.15));
+    this.bgDensityHBwd = config.backgroundDensityHBwd != null ? config.backgroundDensityHBwd : (config.background_density_westbound != null ? config.background_density_westbound : (config.backgroundDensity != null ? config.backgroundDensity : 0.15));
     
     // Geometry Params
     this.jitterOn = config.jitterOn != null ? config.jitterOn : false;
@@ -126,6 +128,7 @@ export class GridSimulation {
     
     this.emergencySpawnTick = params.emergency_spawn_tick != null ? params.emergency_spawn_tick : 50;
     this.subjectSpawnTick = params.subject_spawn_tick != null ? params.subject_spawn_tick : 70;
+    this.turnProb = params.turn_probability != null ? params.turn_probability : 0.15;
     
     this.steps = config.simulationSteps || 1000;
     this.tick = 0;
@@ -146,21 +149,25 @@ export class GridSimulation {
       return 3;
     };
 
-    // Dynamically size roads based on Reversible Lanes
+    // Dynamically size roads based on Reversible Lanes and Arterial status
     this.hFwd = Array.from({ length: this.g.NUM_H }, (_, r) => {
-      const count = getLanesCount(this.revModeH[r], true);
+      const isArterial = r === 2;
+      const count = isArterial ? getLanesCount(this.revModeH[r], true) : 1;
       return Array.from({ length: count }, () => new Array(this.g.HLEN).fill(null));
     });
     this.hBwd = Array.from({ length: this.g.NUM_H }, (_, r) => {
-      const count = getLanesCount(this.revModeH[r], false);
+      const isArterial = r === 2;
+      const count = isArterial ? getLanesCount(this.revModeH[r], false) : 1;
       return Array.from({ length: count }, () => new Array(this.g.HLEN).fill(null));
     });
     this.vFwd = Array.from({ length: this.g.NUM_V }, (_, c) => {
-      const count = getLanesCount(this.revModeV[c], true);
+      const isArterial = c === 3;
+      const count = isArterial ? getLanesCount(this.revModeV[c], true) : 1;
       return Array.from({ length: count }, () => new Array(this.g.VLEN).fill(null));
     });
     this.vBwd = Array.from({ length: this.g.NUM_V }, (_, c) => {
-      const count = getLanesCount(this.revModeV[c], false);
+      const isArterial = c === 3;
+      const count = isArterial ? getLanesCount(this.revModeV[c], false) : 1;
       return Array.from({ length: count }, () => new Array(this.g.VLEN).fill(null));
     });
 
@@ -221,15 +228,20 @@ export class GridSimulation {
 
     const populateLane = (roadArray, roadType, idx, laneIdx, excludes) => {
       let last = -3;
+      const density = (roadType === 'hFwd') ? this.bgDensityHFwd :
+                      (roadType === 'hBwd') ? this.bgDensityHBwd :
+                      this.bgDensity;
+      const isArterial = (roadType === 'hFwd' || roadType === 'hBwd') ? idx === 2 : idx === 3;
+      const vMax = isArterial ? this.vMaxBg : Math.max(2, this.vMaxBg - 2);
       for (let i = 2; i < roadArray.length - 2; i++) {
         if (excludes && (excludes.has(i) || excludes.has(i+1) || excludes.has(i-1))) continue;
-        if (this.rng() < this.bgDensity && i - last > 2) {
+        if (this.rng() < density && i - last > 2) {
           const id = this.vehicleIdCounter++;
-          const car = createVehicle(id, 'background', roadType, idx, laneIdx, i, this.vMaxBg, this.pSlowBg, this.pChangeBg);
+          const car = createVehicle(id, 'background', roadType, idx, laneIdx, i, vMax, this.pSlowBg, this.pChangeBg);
           car.spawnTick = 0;
           // Determine pre-selected turning decision
           const roll = this.rng();
-          car.nextTurn = roll < 0.075 ? 'left' : (roll < 0.15 ? 'right' : 'straight');
+          car.nextTurn = roll < this.turnProb ? 'left' : (roll < 2 * this.turnProb ? 'right' : 'straight');
           roadArray[i] = car;
           this.vehicles.push(car);
           last = i;
@@ -297,30 +309,35 @@ export class GridSimulation {
     }
 
     // 3. Inject Background Vehicles at entry cells dynamically to maintain flow
-    const spawnProb = this.bgDensity * 0.8;
     for (let r = 0; r < this.g.NUM_H; r++) {
+      const isArterial = r === 2;
+      const vMax = isArterial ? this.vMaxBg : Math.max(2, this.vMaxBg - 2);
+      
+      const spawnProbHFwd = this.bgDensityHFwd * 0.8;
       for (let lane = 0; lane < this.hFwd[r].length; lane++) {
-        if (this.hFwd[r][lane][0] === null && this.hFwd[r][lane][1] === null && this.rng() < spawnProb) {
+        if (this.hFwd[r][lane][0] === null && this.hFwd[r][lane][1] === null && this.rng() < spawnProbHFwd) {
           // Avoid overwriting subject/emerg spawn timing
           if (r === 0 && lane === 0 && this.tick === this.emergencySpawnTick) continue;
           if (r === 0 && this.tick === this.subjectSpawnTick) continue;
           
           const id = this.vehicleIdCounter++;
-          const car = createVehicle(id, 'background', 'hFwd', r, lane, 0, this.vMaxBg, this.pSlowBg, this.pChangeBg);
+          const car = createVehicle(id, 'background', 'hFwd', r, lane, 0, vMax, this.pSlowBg, this.pChangeBg);
           car.spawnTick = this.tick;
           const roll = this.rng();
-          car.nextTurn = roll < 0.075 ? 'left' : (roll < 0.15 ? 'right' : 'straight');
+          car.nextTurn = roll < this.turnProb ? 'left' : (roll < 2 * this.turnProb ? 'right' : 'straight');
           this.hFwd[r][lane][0] = car;
           this.vehicles.push(car);
         }
       }
+      
+      const spawnProbHBwd = this.bgDensityHBwd * 0.8;
       for (let lane = 0; lane < this.hBwd[r].length; lane++) {
-        if (this.hBwd[r][lane][0] === null && this.hBwd[r][lane][1] === null && this.rng() < spawnProb) {
+        if (this.hBwd[r][lane][0] === null && this.hBwd[r][lane][1] === null && this.rng() < spawnProbHBwd) {
           const id = this.vehicleIdCounter++;
-          const car = createVehicle(id, 'background', 'hBwd', r, lane, 0, this.vMaxBg, this.pSlowBg, this.pChangeBg);
+          const car = createVehicle(id, 'background', 'hBwd', r, lane, 0, vMax, this.pSlowBg, this.pChangeBg);
           car.spawnTick = this.tick;
           const roll = this.rng();
-          car.nextTurn = roll < 0.075 ? 'left' : (roll < 0.15 ? 'right' : 'straight');
+          car.nextTurn = roll < this.turnProb ? 'left' : (roll < 2 * this.turnProb ? 'right' : 'straight');
           this.hBwd[r][lane][0] = car;
           this.vehicles.push(car);
         }
@@ -554,8 +571,42 @@ export class GridSimulation {
       const rd = this.getRoad(roadType, idx);
       const totalLanes = rd.length;
 
+      // Determine base speed limit based on road classification (major vs minor)
+      const isArterial = (roadType === 'hFwd' || roadType === 'hBwd') ? idx === 2 : idx === 3;
+      let currentVMax = isArterial ? this.vMaxBg : Math.max(2, this.vMaxBg - 2);
+      if (car.type === 'subject') currentVMax = this.vMaxSub;
+      if (car.type === 'emergency') currentVMax = this.vMaxEmerg;
+
+      // Simulating "會車" (narrow lane meeting/passing delay) on minor roads
+      if (!isArterial && car.type !== 'emergency') {
+        const oppType = (roadType === 'hFwd') ? 'hBwd' :
+                        (roadType === 'hBwd') ? 'hFwd' :
+                        (roadType === 'vFwd') ? 'vBwd' : 'vFwd';
+        const oppRoad = this.getRoad(oppType, idx);
+        const oppMaxLen = (oppType === 'hFwd' || oppType === 'hBwd') ? this.g.HLEN : this.g.VLEN;
+        const oppPos = mirror(x, oppMaxLen);
+        
+        // Check if there is oncoming traffic nearby in the opposite lanes
+        let oncomingClose = false;
+        for (let l = 0; l < oppRoad.length; l++) {
+          for (let dx = -3; dx <= 3; dx++) {
+            const checkX = oppPos + dx;
+            if (checkX >= 0 && checkX < oppRoad[l].length && oppRoad[l][checkX] !== null) {
+              oncomingClose = true;
+              break;
+            }
+          }
+          if (oncomingClose) break;
+        }
+        
+        if (oncomingClose) {
+          // Slow down speed limit to 1 cell/tick to simulate cautious passing/yielding
+          currentVMax = 1;
+        }
+      }
+
       // 1. Acceleration
-      let v = Math.min(car.v + 1, car.vMax);
+      let v = Math.min(car.v + 1, currentVMax);
 
       // 2. Collision avoidance (Front Vehicle)
       const frontCar = this.findFrontVehicle(roadType, idx, lane, x);
@@ -715,12 +766,18 @@ export class GridSimulation {
               finalIdx = targetIdx;
               finalLane = chosenLane;
               finalNextX = targetPos + 1; // Move past the intersection
+              
+              // Update speed limit based on road classification (arterial vs non-arterial)
+              if (car.type === 'background') {
+                const targetIsArterial = (targetRoadType === 'hFwd' || targetRoadType === 'hBwd') ? targetIdx === 2 : targetIdx === 3;
+                car.vMax = targetIsArterial ? this.vMaxBg : Math.max(2, this.vMaxBg - 2);
+              }
             }
           }
           
           // Pre-select the next turning decision for the upcoming intersection
           const roll = this.rng();
-          car.nextTurn = roll < 0.075 ? 'left' : (roll < 0.15 ? 'right' : 'straight');
+          car.nextTurn = roll < this.turnProb ? 'left' : (roll < 2 * this.turnProb ? 'right' : 'straight');
         }
       }
 
@@ -995,9 +1052,15 @@ export function runExperimentASweep(seed, deltaT, bgDensity) {
     const HLEN = sim.g.segH.reduce((a, b) => a + b, 0) + sim.g.NUM_V;
     sim.g.HLEN = HLEN;
     
-    // Re-initialize arrays
-    sim.hFwd = Array.from({ length: sim.g.NUM_H }, () => [new Array(HLEN).fill(null), new Array(HLEN).fill(null), new Array(HLEN).fill(null)]);
-    sim.hBwd = Array.from({ length: sim.g.NUM_H }, () => [new Array(HLEN).fill(null), new Array(HLEN).fill(null), new Array(HLEN).fill(null)]);
+    // Re-initialize arrays preserving lane counts
+    sim.hFwd = Array.from({ length: sim.g.NUM_H }, (_, r) => {
+      const count = r === 2 ? 3 : 1;
+      return Array.from({ length: count }, () => new Array(HLEN).fill(null));
+    });
+    sim.hBwd = Array.from({ length: sim.g.NUM_H }, (_, r) => {
+      const count = r === 2 ? 3 : 1;
+      return Array.from({ length: count }, () => new Array(HLEN).fill(null));
+    });
     sim.populateInitialVehicles();
 
     const res = sim.run();

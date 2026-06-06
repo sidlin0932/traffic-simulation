@@ -48,7 +48,7 @@ Standard Taiwan-compliant driving rules are enforced:
 
 ### 3.3 Road Markings (ROC Standards)
 - **Reversible Lane Limits**: Rendered as double white dashed lines.
-- **Direction Separator**: Rendered as single yellow dashed lines.
+- **Direction Separator**: Rendered as double solid yellow lines.
 - **Lane and Stop Lines**: Rendered as solid white lines.
 - **Turn Guides**: High-quality vector arrows inside each lane indicating allowed direction transitions.
 

@@ -18,7 +18,7 @@ All notable changes to the **Taipei Grid Microscopic Traffic Simulation System**
 
 ## [1.4.0] - 2026-06-05
 ### Added
-- **ROC Standard Road Markings**: Single Yellow dashed lines (separating opposite traffic), Double White dashed lines (reversible lanes), Solid White lines (lane limits and stop lines).
+- **ROC Standard Road Markings**: Double Solid Yellow lines (separating opposite traffic), Double White dashed lines (reversible lanes), Solid White lines (lane limits and stop lines).
 - **Crossing Conflict Detection**: Checks and flags vehicles crossing paths at intersections.
 - **Four Coordinated Signal Modes**: `all_sync` (all sync), `alternating` (alternate), `green_wave_h` (horizontal green wave), and `green_wave_v` (vertical green wave).
 - **Simulation Server**: Created `server.js` exposing `POST /api/v1/simulation/run` for headless simulation execution and batch analysis.

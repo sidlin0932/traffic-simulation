@@ -25,12 +25,14 @@ export default function TrafficSimSpec() {
   // Simulation State
   const [seed, setSeed] = useState(42);
   const [segLength, setSegLength] = useState(20);
-  const [density, setDensity] = useState(0.12);
+  const [densityHFwd, setDensityHFwd] = useState(0.12);
+  const [densityHBwd, setDensityHBwd] = useState(0.12);
   const [steps, setSteps] = useState(800);
   const [expType, setExpType] = useState("B2"); // 'custom', 'A', 'B1', 'B2'
   const [deltaT, setDeltaT] = useState(30);
   const [pChangeBg, setPChangeBg] = useState(0.1);
   const [pChangeSub, setPChangeSub] = useState(1.0);
+  const [turnProbability, setTurnProbability] = useState(0.15);
   const [isPlaying, setIsPlaying] = useState(false);
   const [simSpeed, setSimSpeed] = useState(100); // ms per tick
 
@@ -73,7 +75,8 @@ export default function TrafficSimSpec() {
     // Create new simulation instance
     const s = new GridSimulation({
       seed: seed,
-      backgroundDensity: density,
+      backgroundDensityHFwd: densityHFwd,
+      backgroundDensityHBwd: densityHBwd,
       simulationSteps: steps,
       experimentType: expType,
       exportTrajectories: true,
@@ -86,7 +89,8 @@ export default function TrafficSimSpec() {
         p_change_background: pChangeBg,
         p_change_subject: pChangeSub,
         emergency_spawn_tick: 50,
-        subject_spawn_tick: 70
+        subject_spawn_tick: 70,
+        turn_probability: turnProbability
       }
     });
 
@@ -107,9 +111,20 @@ export default function TrafficSimSpec() {
     const C = 6;
     const LANE_GAP = 1;
     const PAD = 20;
-    const ROAD_W = C * 6 + LANE_GAP * 5;
-    const hRoadY = (r) => PAD + g.vInt[r] * C + C / 2 - ROAD_W / 2;
-    const vRoadX = (c) => PAD + g.hInt[c] * C + C / 2 - ROAD_W / 2;
+
+    const getRoadWidthH = (r) => {
+      const fwd = currentSim.hFwd[r] ? currentSim.hFwd[r].length : 3;
+      const bwd = currentSim.hBwd[r] ? currentSim.hBwd[r].length : 3;
+      return C * (fwd + bwd) + LANE_GAP * (fwd + bwd - 1);
+    };
+    const getRoadWidthV = (c) => {
+      const fwd = currentSim.vFwd[c] ? currentSim.vFwd[c].length : 3;
+      const bwd = currentSim.vBwd[c] ? currentSim.vBwd[c].length : 3;
+      return C * (fwd + bwd) + LANE_GAP * (fwd + bwd - 1);
+    };
+
+    const hRoadY = (r) => PAD + g.vInt[r] * C + C / 2 - getRoadWidthH(r) / 2;
+    const vRoadX = (c) => PAD + g.hInt[c] * C + C / 2 - getRoadWidthV(c) / 2;
 
     let px = 0;
     let py = 0;
@@ -137,11 +152,11 @@ export default function TrafficSimSpec() {
             found = true;
             break;
           } else if (pos === stopCell) {
-            px = vRoadX(c) + ROAD_W / 2 - C / 2;
+            px = vRoadX(c) + getRoadWidthV(c) / 2 - C / 2;
             found = true;
             break;
           }
-          prevX = vRoadX(c) + ROAD_W;
+          prevX = vRoadX(c) + getRoadWidthV(c);
           prevCell = stopCell;
         }
         if (!found) {
@@ -158,14 +173,14 @@ export default function TrafficSimSpec() {
           const stopCell = g.hInt[c];
           if (physPos > stopCell) {
             const startX = prevX;
-            const endX = vRoadX(c) + ROAD_W;
+            const endX = vRoadX(c) + getRoadWidthV(c);
             const cellsInSeg = prevCell - stopCell - 1;
             const localPos = prevCell - physPos - 1;
             px = startX - localPos * (startX - endX - C) / Math.max(1, cellsInSeg - 1) - C;
             found = true;
             break;
           } else if (physPos === stopCell) {
-            px = vRoadX(c) + ROAD_W / 2 - C / 2;
+            px = vRoadX(c) + getRoadWidthV(c) / 2 - C / 2;
             found = true;
             break;
           }
@@ -195,11 +210,11 @@ export default function TrafficSimSpec() {
             found = true;
             break;
           } else if (pos === stopCell) {
-            py = hRoadY(r) + ROAD_W / 2 - C / 2;
+            py = hRoadY(r) + getRoadWidthH(r) / 2 - C / 2;
             found = true;
             break;
           }
-          prevY = hRoadY(r) + ROAD_W;
+          prevY = hRoadY(r) + getRoadWidthH(r);
           prevCell = stopCell;
         }
         if (!found) {
@@ -216,14 +231,14 @@ export default function TrafficSimSpec() {
           const stopCell = g.vInt[r];
           if (physPos > stopCell) {
             const startY = prevY;
-            const endY = hRoadY(r) + ROAD_W;
+            const endY = hRoadY(r) + getRoadWidthH(r);
             const cellsInSeg = prevCell - stopCell - 1;
             const localPos = prevCell - physPos - 1;
             py = startY - localPos * (startY - endY - C) / Math.max(1, cellsInSeg - 1) - C;
             found = true;
             break;
           } else if (physPos === stopCell) {
-            py = hRoadY(r) + ROAD_W / 2 - C / 2;
+            py = hRoadY(r) + getRoadWidthH(r) / 2 - C / 2;
             found = true;
             break;
           }
@@ -244,7 +259,7 @@ export default function TrafficSimSpec() {
     return () => {
       if (animationRef.current) clearInterval(animationRef.current);
     };
-  }, [segLength, density, expType, deltaT, pChangeBg, pChangeSub, seed, signalMode, revModeH, revModeV]);
+  }, [segLength, densityHFwd, densityHBwd, expType, deltaT, pChangeBg, pChangeSub, seed, signalMode, revModeH, revModeV, turnProbability]);
 
   // Tick step of simulation
   const stepSimulation = () => {
@@ -310,9 +325,18 @@ export default function TrafficSimSpec() {
     // Grid coordinate parameters
     const C = 6; // CELL_PX
     const LANE_GAP = 1;
-    const lanesPerDir = 3;
-    const ROAD_W = C * lanesPerDir * 2 + LANE_GAP * 5;
     const PAD = 20;
+
+    const getRoadWidthH = (r) => {
+      const fwd = sim.hFwd[r] ? sim.hFwd[r].length : 3;
+      const bwd = sim.hBwd[r] ? sim.hBwd[r].length : 3;
+      return C * (fwd + bwd) + LANE_GAP * (fwd + bwd - 1);
+    };
+    const getRoadWidthV = (c) => {
+      const fwd = sim.vFwd[c] ? sim.vFwd[c].length : 3;
+      const bwd = sim.vBwd[c] ? sim.vBwd[c].length : 3;
+      return C * (fwd + bwd) + LANE_GAP * (fwd + bwd - 1);
+    };
 
     // Set canvas dimensions based on geometry
     const canvasW = PAD * 2 + g.HLEN * C;
@@ -330,17 +354,31 @@ export default function TrafficSimSpec() {
     ctx.fillRect(0, 0, canvasW, canvasH);
 
     // Redefined coordinate helpers to align roads perfectly with intersection centers
-    const hRoadY = (r) => PAD + g.vInt[r] * C + C / 2 - ROAD_W / 2;
-    const vRoadX = (c) => PAD + g.hInt[c] * C + C / 2 - ROAD_W / 2;
+    const hRoadY = (r) => PAD + g.vInt[r] * C + C / 2 - getRoadWidthH(r) / 2;
+    const vRoadX = (c) => PAD + g.hInt[c] * C + C / 2 - getRoadWidthV(c) / 2;
 
     // Draw Roads (horizontal and vertical)
-    ctx.fillStyle = "#161b22";
     for (let r = 0; r < g.NUM_H; r++) {
-      ctx.fillRect(PAD, hRoadY(r), g.HLEN * C, ROAD_W);
+      const isArterial = r === 2;
+      ctx.fillStyle = isArterial ? "#212630" : "#141923";
+      ctx.fillRect(PAD, hRoadY(r), g.HLEN * C, getRoadWidthH(r));
     }
     for (let c = 0; c < g.NUM_V; c++) {
-      ctx.fillRect(vRoadX(c), PAD, ROAD_W, g.VLEN * C);
+      const isArterial = c === 3;
+      ctx.fillStyle = isArterial ? "#212630" : "#141923";
+      ctx.fillRect(vRoadX(c), PAD, getRoadWidthV(c), g.VLEN * C);
     }
+
+    // Draw road labels for Arterial Roads
+    ctx.fillStyle = "rgba(102, 252, 241, 0.45)"; // primary theme color with transparency
+    ctx.font = "bold 9px 'Outfit', sans-serif";
+    ctx.fillText("主要幹道 H2 (Arterial H2)", PAD + 10, hRoadY(2) - 4);
+
+    ctx.save();
+    ctx.translate(vRoadX(3) - 4, PAD + 50);
+    ctx.rotate(-Math.PI / 2);
+    ctx.fillText("主要幹道 V3 (Arterial V3)", 0, 0);
+    ctx.restore();
 
     // Draw Lane Dividers & ROC Markings
     ctx.lineWidth = 1;
@@ -411,7 +449,7 @@ export default function TrafficSimSpec() {
             ctx.lineTo(xStart, y);
             ctx.stroke();
           }
-          currentX = xStart + ROAD_W;
+          currentX = xStart + getRoadWidthV(c);
         }
       }
       if (currentX < PAD + g.HLEN * C) {
@@ -440,7 +478,7 @@ export default function TrafficSimSpec() {
             ctx.lineTo(x, yStart);
             ctx.stroke();
           }
-          currentY = yStart + ROAD_W;
+          currentY = yStart + getRoadWidthH(r);
         }
       }
       if (currentY < PAD + g.VLEN * C) {
@@ -461,7 +499,8 @@ export default function TrafficSimSpec() {
       // 1. Center Line / Reversible Lane Line (drawn in segments)
       const boundaryY = y0 + bwdCount * (C + LANE_GAP) - LANE_GAP / 2;
       if (sim.revModeH[r] === "none") {
-        drawHorizontalLineInSegments(r, boundaryY, "#eab308", 1.2, [6, 6]);
+        drawHorizontalLineInSegments(r, boundaryY - 1, "#eab308", 1, []);
+        drawHorizontalLineInSegments(r, boundaryY + 1, "#eab308", 1, []);
       } else {
         drawHorizontalLineInSegments(r, boundaryY - 1, "#ffffff", 1, [4, 4]);
         drawHorizontalLineInSegments(r, boundaryY + 1, "#ffffff", 1, [4, 4]);
@@ -478,7 +517,7 @@ export default function TrafficSimSpec() {
         ctx.setLineDash([]);
         for (let c = 0; c < g.NUM_V; c++) {
           if (!g.present[r][c]) continue;
-          const stopX = vRoadX(c) + ROAD_W;
+          const stopX = vRoadX(c) + getRoadWidthV(c);
           const endX = Math.min(PAD + g.HLEN * C, stopX + 6 * C);
           ctx.beginPath(); ctx.moveTo(stopX, yL); ctx.lineTo(endX, yL); ctx.stroke();
         }
@@ -507,11 +546,11 @@ export default function TrafficSimSpec() {
       for (let c = 0; c < g.NUM_V; c++) {
         if (!g.present[r][c]) continue;
         // hBwd stop line (top half, Westbound, stops at right edge)
-        const xBwd = vRoadX(c) + ROAD_W;
+        const xBwd = vRoadX(c) + getRoadWidthV(c);
         ctx.beginPath(); ctx.moveTo(xBwd, y0); ctx.lineTo(xBwd, y0 + bwdCount * (C + LANE_GAP) - LANE_GAP); ctx.stroke();
         // hFwd stop line (bottom half, Eastbound, stops at left edge)
         const xFwd = vRoadX(c);
-        ctx.beginPath(); ctx.moveTo(xFwd, y0 + bwdCount * (C + LANE_GAP)); ctx.lineTo(xFwd, y0 + ROAD_W); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(xFwd, y0 + bwdCount * (C + LANE_GAP)); ctx.lineTo(xFwd, y0 + getRoadWidthH(r)); ctx.stroke();
       }
 
       // 4. Draw Lane Direction Arrows
@@ -519,7 +558,7 @@ export default function TrafficSimSpec() {
         if (!g.present[r][c]) continue;
         
         // hBwd Arrows (driver goes West <-, rot = Math.PI, top half)
-        const xArrowBwd = vRoadX(c) + ROAD_W + 2 * C + C / 2;
+        const xArrowBwd = vRoadX(c) + getRoadWidthV(c) + 2 * C + C / 2;
         for (let l = 0; l < bwdCount; l++) {
           let type = "straight";
           if (l === bwdCount - 1) type = "straight_left";
@@ -547,7 +586,8 @@ export default function TrafficSimSpec() {
       // 1. Center Line / Reversible Lane Line
       const boundaryX = x0 + fwdCount * (C + LANE_GAP) - LANE_GAP / 2;
       if (sim.revModeV[c] === "none") {
-        drawVerticalLineInSegments(c, boundaryX, "#eab308", 1.2, [6, 6]);
+        drawVerticalLineInSegments(c, boundaryX - 1, "#eab308", 1, []);
+        drawVerticalLineInSegments(c, boundaryX + 1, "#eab308", 1, []);
       } else {
         drawVerticalLineInSegments(c, boundaryX - 1, "#ffffff", 1, [4, 4]);
         drawVerticalLineInSegments(c, boundaryX + 1, "#ffffff", 1, [4, 4]);
@@ -579,7 +619,7 @@ export default function TrafficSimSpec() {
         ctx.setLineDash([]);
         for (let r = 0; r < g.NUM_H; r++) {
           if (!g.present[r][c]) continue;
-          const stopY = hRoadY(r) + ROAD_W;
+          const stopY = hRoadY(r) + getRoadWidthH(r);
           const endY = Math.min(PAD + g.VLEN * C, stopY + 6 * C);
           ctx.beginPath(); ctx.moveTo(xL, stopY); ctx.lineTo(xL, endY); ctx.stroke();
         }
@@ -595,8 +635,8 @@ export default function TrafficSimSpec() {
         const yFwd = hRoadY(r);
         ctx.beginPath(); ctx.moveTo(x0, yFwd); ctx.lineTo(x0 + fwdCount * (C + LANE_GAP) - LANE_GAP, yFwd); ctx.stroke();
         // vBwd stop line (right half, Northbound, stops at bottom edge)
-        const yBwd = hRoadY(r) + ROAD_W;
-        ctx.beginPath(); ctx.moveTo(x0 + fwdCount * (C + LANE_GAP), yBwd); ctx.lineTo(x0 + ROAD_W, yBwd); ctx.stroke();
+        const yBwd = hRoadY(r) + getRoadWidthH(r);
+        ctx.beginPath(); ctx.moveTo(x0 + fwdCount * (C + LANE_GAP), yBwd); ctx.lineTo(x0 + getRoadWidthV(c), yBwd); ctx.stroke();
       }
 
       // 4. Draw Lane Direction Arrows
@@ -613,7 +653,7 @@ export default function TrafficSimSpec() {
         }
 
         // vBwd Arrows (driver goes North ^|, rot = Math.PI * 1.5, right half)
-        const yArrowBwd = hRoadY(r) + ROAD_W + 2 * C + C / 2;
+        const yArrowBwd = hRoadY(r) + getRoadWidthH(r) + 2 * C + C / 2;
         for (let l = 0; l < bwdCount; l++) {
           let type = "straight";
           if (l === 0) type = "straight_left";
@@ -640,7 +680,7 @@ export default function TrafficSimSpec() {
         ctx.beginPath(); ctx.arc(hFwdX, hFwdY, 2.5, 0, Math.PI * 2); ctx.fill();
 
         // 2. hBwd Light (going West, top half, stops at right edge)
-        const hBwdX = vRoadX(c) + ROAD_W;
+        const hBwdX = vRoadX(c) + getRoadWidthV(c);
         const hBwdY = hRoadY(r) + bwdCountH * (C + LANE_GAP) / 2 - LANE_GAP / 2;
         ctx.fillStyle = hg ? theme.success : theme.danger;
         ctx.beginPath(); ctx.arc(hBwdX, hBwdY, 2.5, 0, Math.PI * 2); ctx.fill();
@@ -653,7 +693,7 @@ export default function TrafficSimSpec() {
 
         // 4. vBwd Light (going North, right half, stops at bottom edge)
         const vBwdX = vRoadX(c) + fwdCountV * (C + LANE_GAP) + bwdCountV * (C + LANE_GAP) / 2 - LANE_GAP / 2;
-        const vBwdY = hRoadY(r) + ROAD_W;
+        const vBwdY = hRoadY(r) + getRoadWidthH(r);
         ctx.fillStyle = !hg ? theme.success : theme.danger;
         ctx.beginPath(); ctx.arc(vBwdX, vBwdY, 2.5, 0, Math.PI * 2); ctx.fill();
       }
@@ -717,9 +757,20 @@ export default function TrafficSimSpec() {
     const LANE_GAP = 1;
     const PAD = 20;
     const g = sim.g;
-    const ROAD_W = C * 6 + LANE_GAP * 5;
-    const hRoadY = (r) => PAD + g.vInt[r] * C + C / 2 - ROAD_W / 2;
-    const vRoadX = (c) => PAD + g.hInt[c] * C + C / 2 - ROAD_W / 2;
+    
+    const getRoadWidthH = (r) => {
+      const fwd = sim.hFwd[r] ? sim.hFwd[r].length : 3;
+      const bwd = sim.hBwd[r] ? sim.hBwd[r].length : 3;
+      return C * (fwd + bwd) + LANE_GAP * (fwd + bwd - 1);
+    };
+    const getRoadWidthV = (c) => {
+      const fwd = sim.vFwd[c] ? sim.vFwd[c].length : 3;
+      const bwd = sim.vBwd[c] ? sim.vBwd[c].length : 3;
+      return C * (fwd + bwd) + LANE_GAP * (fwd + bwd - 1);
+    };
+    
+    const hRoadY = (r) => PAD + g.vInt[r] * C + C / 2 - getRoadWidthH(r) / 2;
+    const vRoadX = (c) => PAD + g.hInt[c] * C + C / 2 - getRoadWidthV(c) / 2;
 
     let closestCar = null;
     let minDist = 15; // Max click distance 15px
@@ -746,7 +797,7 @@ export default function TrafficSimSpec() {
     setIsSweeping(true);
     // Let UI render loading state
     setTimeout(() => {
-      const res = runExperimentASweep(seed, deltaT, density);
+      const res = runExperimentASweep(seed, deltaT, (densityHFwd + densityHBwd) / 2);
       setSweepData(res.sweep);
       setBestL(res.best_road_length);
       setCalcCruiseSpeed(res.calculated_cruise_speed);
@@ -762,7 +813,8 @@ export default function TrafficSimSpec() {
       // 1. Control Run (Background only, P_change = 0.1)
       const simCtrl = new GridSimulation({
         simulationSteps: 800,
-        backgroundDensity: 0.18,
+        backgroundDensityHFwd: densityHFwd,
+        backgroundDensityHBwd: densityHBwd,
         seed: seed,
         experimentType: 'custom',
         params: {
@@ -774,7 +826,8 @@ export default function TrafficSimSpec() {
       // 2. Weaving Scenario (Subject weaving, P_change = 1.0)
       const simWeave = new GridSimulation({
         simulationSteps: 800,
-        backgroundDensity: 0.18,
+        backgroundDensityHFwd: densityHFwd,
+        backgroundDensityHBwd: densityHBwd,
         seed: seed,
         experimentType: 'B1',
         params: {
@@ -788,7 +841,8 @@ export default function TrafficSimSpec() {
       // 3. Tailgating Scenario (Subject tailgating emergency vehicle)
       const simTailgate = new GridSimulation({
         simulationSteps: 800,
-        backgroundDensity: 0.18,
+        backgroundDensityHFwd: densityHFwd,
+        backgroundDensityHBwd: densityHBwd,
         seed: seed,
         experimentType: 'B2',
         params: {
@@ -942,14 +996,40 @@ export default function TrafficSimSpec() {
               </div>
 
               <div>
-                <label style={{ display: "block", fontSize: "12px", color: theme.textMuted, marginBottom: "4px" }}>車流密度: {(density * 100).toFixed(0)}%</label>
+                <label style={{ display: "block", fontSize: "12px", color: theme.textMuted, marginBottom: "4px" }}>東向車流密度 (Eastbound): {(densityHFwd * 100).toFixed(0)}%</label>
                 <input
                   type="range"
                   min={0.05}
                   max={0.3}
                   step={0.01}
-                  value={density}
-                  onChange={(e) => setDensity(Number(e.target.value))}
+                  value={densityHFwd}
+                  onChange={(e) => setDensityHFwd(Number(e.target.value))}
+                  style={{ width: "100%", accentColor: theme.primary }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: "block", fontSize: "12px", color: theme.textMuted, marginBottom: "4px" }}>西向車流密度 (Westbound): {(densityHBwd * 100).toFixed(0)}%</label>
+                <input
+                  type="range"
+                  min={0.05}
+                  max={0.3}
+                  step={0.01}
+                  value={densityHBwd}
+                  onChange={(e) => setDensityHBwd(Number(e.target.value))}
+                  style={{ width: "100%", accentColor: theme.primary }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: "block", fontSize: "12px", color: theme.textMuted, marginBottom: "4px" }}>路口轉彎機率: {(turnProbability * 100).toFixed(0)}%</label>
+                <input
+                  type="range"
+                  min={0.05}
+                  max={0.4}
+                  step={0.05}
+                  value={turnProbability}
+                  onChange={(e) => setTurnProbability(Number(e.target.value))}
                   style={{ width: "100%", accentColor: theme.primary }}
                 />
               </div>
@@ -1064,7 +1144,7 @@ export default function TrafficSimSpec() {
                     cursor: "pointer"
                   }}
                 >
-                  <option value="none">常態配置 (3+3 單黃虛線)</option>
+                  <option value="none">常態配置 (3+3 雙黃實線)</option>
                   <option value="peak_fwd">東向尖峰 (4+2 雙白虛線)</option>
                   <option value="peak_bwd">西向尖峰 (2+4 雙白虛線)</option>
                 </select>

@@ -23,6 +23,8 @@ This document defines the standard API specifications, parameters, schemas, and 
   "random_seed": 42,
   "simulation_steps": 1000,
   "background_density": 0.15,
+  "background_density_eastbound": 0.18,
+  "background_density_westbound": 0.12,
   "experiment_type": "B2",
   "export_trajectories": false,
   "signal_mode": "alternating",
@@ -50,7 +52,9 @@ This document defines the standard API specifications, parameters, schemas, and 
 | :--- | :--- | :--- | :--- | :--- |
 | `random_seed` | Integer | `42` | Any integer | Seed for seedable Mulberry32 PRNG to guarantee reproducibility.<br>亂數種子，用以確保模擬隨機慢化與注入機率可完全重現。 |
 | `simulation_steps` | Integer | `1000` | `1 ~ 10000` | Total number of simulation ticks (steps).<br>模擬運行的總時間步（Ticks）。 |
-| `background_density` | Float | `0.15` | `0.0 ~ 0.5` | Initial and injected vehicle density on the road grid.<br>背景車流初始與注入密度。 |
+| `background_density` | Float | `0.15` | `0.0 ~ 0.5` | General background vehicle density on the road grid (fallback if directional density is not specified).<br>通用背景車流密度（若未特別指定單向密度時的預設值）。 |
+| `background_density_eastbound` | Float | `None` | `0.0 ~ 0.5` | Injected vehicle density for Eastbound (hFwd) traffic.<br>東向背景車流注入密度。 |
+| `background_density_westbound` | Float | `None` | `0.0 ~ 0.5` | Injected vehicle density for Westbound (hBwd) traffic.<br>西向背景車流注入密度。 |
 | `experiment_type` | String | `"custom"` | `"A"`, `"B1"`, `"B2"`, `"custom"` | **"A"**: Block length sweep.<br>**"B1"**: Phantom jam detection.<br>**"B2"**: Subject vehicle selfishness ratio analysis.<br>**"custom"**: Run simulation with custom params.<br>實驗類型：`"A"` (長度掃描), `"B1"` (幽靈塞車), `"B2"` (利己比率分析), `"custom"` (自訂參數)。 |
 | `export_trajectories` | Boolean | `false` | `true`, `false` | If true, returns detailed trajectories profile for all vehicles.<br>是否匯出全車輛的每一步時空軌跡數據。 |
 | `signal_mode` | String | `"alternating"` | `"all_sync"`, `"alternating"`, `"green_wave"`, `"adaptive"` | **"all_sync"**: Sync lights.<br>**"alternating"**: Alternating offset.<br>**"green_wave"**: Coordinated green wave.<br>**"adaptive"**: Self-adaptive sensing.<br>號誌控制模式。 |
