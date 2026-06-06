@@ -44,6 +44,7 @@ export default function TrafficSimSpec() {
   const [turnProbability, setTurnProbability] = useState(0.15);
   const [isPlaying, setIsPlaying] = useState(false);
   const [simSpeed, setSimSpeed] = useState(100); // ms per tick
+  const [simMultiplier, setSimMultiplierState] = useState(1); // steps per tick
   const [naturalMode, setNaturalMode] = useState(false);
   const [clockDisplay, setClockDisplay] = useState('07:00:00');
   const [clockPeriod, setClockPeriod] = useState('');
@@ -197,6 +198,33 @@ export default function TrafficSimSpec() {
   const canvasRef = useRef(null);
   const simRef = useRef(null);
   const animationRef = useRef(null);
+  const simMultiplierRef = useRef(1);
+
+  const setSimMultiplier = (val) => {
+    setSimMultiplierState(val);
+    simMultiplierRef.current = val;
+  };
+
+  const handleTimeChange = (timeStr) => {
+    if (!timeStr) return;
+    const [hStr, mStr] = timeStr.split(':');
+    const targetSeconds = parseInt(hStr, 10) * 3600 + parseInt(mStr, 10) * 60;
+    if (simRef.current) {
+      simRef.current.clockSeconds = targetSeconds;
+      const clk = simRef.current.getVirtualClock();
+      setClockDisplay(clk.display);
+      setClockPeriod(clk.period);
+    }
+  };
+
+  const getClockTimeHHMM = () => {
+    if (!clockDisplay) return "07:00";
+    const parts = clockDisplay.split(':');
+    if (parts.length >= 2) {
+      return `${parts[0]}:${parts[1]}`;
+    }
+    return "07:00";
+  };
 
   // Interpolation cache for smooth lane changes
   // carId -> { prevLane, progress }
@@ -576,7 +604,10 @@ export default function TrafficSimSpec() {
       prevLanes.set(c.id, c.lane);
     });
 
-    s.step();
+    const stepsToRun = Math.max(1, simMultiplierRef.current);
+    for (let i = 0; i < stepsToRun; i++) {
+      s.step();
+    }
 
     // Setup lane change interpolation
     s.vehicles.forEach(c => {
@@ -1937,7 +1968,7 @@ export default function TrafficSimSpec() {
                 <div style={{ textAlign: "center", fontSize: "11px", color: theme.secondary, marginBottom: "8px" }}>{clockPeriod}</div>
               )}
               {/* Natural Mode toggle */}
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "10px" }}>
                 <span style={{ fontSize: "11px", color: theme.textMuted }}>自然流量模式 (上下班尖峰)</span>
                 <button
                   id="natural-mode-toggle"
@@ -1962,6 +1993,82 @@ export default function TrafficSimSpec() {
                 >
                   {naturalMode ? '🟢 開啟' : '⚫ 關閉'}
                 </button>
+              </div>
+
+              {/* Time Adjuster */}
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: "10px", borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: "10px" }}>
+                <span style={{ fontSize: "11px", color: theme.textMuted }}>調整虛擬時間</span>
+                <input
+                  type="time"
+                  value={getClockTimeHHMM()}
+                  onChange={(e) => handleTimeChange(e.target.value)}
+                  style={{
+                    background: "#161b22",
+                    border: "1px solid rgba(255,255,255,0.15)",
+                    borderRadius: "4px",
+                    color: "#fff",
+                    padding: "2px 6px",
+                    fontSize: "12px",
+                    fontFamily: "monospace",
+                    cursor: "pointer"
+                  }}
+                />
+              </div>
+
+              {/* Time Presets */}
+              <div style={{ display: "flex", gap: "4px", marginTop: "8px", flexWrap: "wrap" }}>
+                {[
+                  { label: "🌅 朝峰", time: "07:30" },
+                  { label: "☀️ 午間", time: "12:30" },
+                  { label: "🌇 暮峰", time: "17:30" },
+                  { label: "🌌 夜晚", time: "23:00" }
+                ].map(p => (
+                  <button
+                    key={p.time}
+                    onClick={() => handleTimeChange(p.time)}
+                    style={{
+                      flex: 1,
+                      background: "rgba(255,255,255,0.05)",
+                      color: theme.secondary,
+                      border: "1px solid rgba(102,252,241,0.1)",
+                      borderRadius: "4px",
+                      padding: "3px 0",
+                      fontSize: "10px",
+                      cursor: "pointer",
+                      transition: "all 0.2s"
+                    }}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Multiplier Adjustment */}
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: "10px", borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: "10px" }}>
+                <span style={{ fontSize: "11px", color: theme.textMuted }}>模擬步進加速 (Time Warp)</span>
+              </div>
+              <div style={{ display: "flex", gap: "4px", marginTop: "6px", flexWrap: "wrap" }}>
+                {[1, 2, 5, 10, 20, 50, 100].map(m => (
+                  <button
+                    key={m}
+                    onClick={() => setSimMultiplier(m)}
+                    style={{
+                      flex: 1,
+                      minWidth: "32px",
+                      background: simMultiplier === m ? theme.primary : "rgba(255,255,255,0.05)",
+                      color: simMultiplier === m ? "#000" : "#fff",
+                      border: "none",
+                      borderRadius: "4px",
+                      padding: "4px 0",
+                      fontSize: "10px",
+                      fontWeight: "bold",
+                      cursor: "pointer",
+                      transition: "all 0.2s"
+                    }}
+                  >
+                    {m}x
+                  </button>
+                ))}
               </div>
             </div>
 
