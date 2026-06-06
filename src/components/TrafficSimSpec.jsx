@@ -1448,12 +1448,194 @@ export default function TrafficSimSpec() {
             position: "sticky",
             top: "16px",
             maxHeight: "calc(100vh - 32px)",
-            overflowY: "auto",
-            overflowX: "hidden",
+            display: "flex",
+            flexDirection: "column",
+            overflow: "hidden",
           }}>
-            <h3 style={{ margin: "0 0 16px 0", color: theme.textLight, fontSize: "16px" }}>參數配置</h3>
+            <h3 style={{ margin: "0 0 12px 0", color: theme.textLight, fontSize: "16px", flexShrink: 0 }}>核心操作與參數配置</h3>
             
-            <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+            {/* Core Controls (Virtual Clock & Play/Pause/Reset - Sticky/Fixed at Top) */}
+            <div style={{
+              background: "rgba(10,15,24,0.8)",
+              border: "1px solid rgba(102,252,241,0.25)",
+              borderRadius: "10px",
+              padding: "12px 14px",
+              marginBottom: "12px",
+              boxShadow: "0 4px 15px rgba(0,0,0,0.5)",
+              flexShrink: 0,
+              display: "flex",
+              flexDirection: "column",
+              gap: "8px"
+            }}>
+              {/* Play / Pause / Reset Buttons */}
+              <div style={{ display: "flex", gap: "8px" }}>
+                <button
+                  onClick={togglePlay}
+                  style={{
+                    flex: 2,
+                    background: isPlaying ? theme.warning : theme.success,
+                    color: "#000",
+                    fontWeight: "900",
+                    border: "none",
+                    padding: "10px 14px",
+                    borderRadius: "6px",
+                    cursor: "pointer",
+                    fontSize: "14px",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: "6px",
+                    boxShadow: isPlaying ? "0 0 10px rgba(255, 193, 7, 0.3)" : "0 0 10px rgba(40, 167, 69, 0.3)",
+                    transition: "all 0.2s"
+                  }}
+                >
+                  {isPlaying ? "⏸️ 暫停" : "▶️ 播放"}
+                </button>
+                <button
+                  onClick={initializeSimulation}
+                  style={{
+                    flex: 1,
+                    background: "#30363d",
+                    color: "#fff",
+                    fontWeight: "bold",
+                    border: "1px solid rgba(255,255,255,0.1)",
+                    padding: "10px 14px",
+                    borderRadius: "6px",
+                    cursor: "pointer",
+                    fontSize: "13px",
+                    transition: "all 0.2s"
+                  }}
+                >
+                  🔄 重置
+                </button>
+              </div>
+
+              {/* Clock display */}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: "6px" }}>
+                <span style={{ fontSize: "10px", color: theme.textMuted, textTransform: "uppercase", letterSpacing: "0.06em" }}>虛擬時鐘 (24h)</span>
+                <span style={{ fontFamily: "monospace", fontSize: "18px", fontWeight: 700, color: theme.primary, letterSpacing: "0.10em" }}>
+                  {clockDisplay || '07:00:00'}
+                </span>
+              </div>
+              {clockPeriod && naturalMode && (
+                <div style={{ textAlign: "center", fontSize: "11px", color: theme.secondary }}>{clockPeriod}</div>
+              )}
+
+              {/* Natural Mode toggle */}
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <span style={{ fontSize: "11px", color: theme.textMuted }}>自然流量模式 (上下班尖峰)</span>
+                <button
+                  id="natural-mode-toggle"
+                  onClick={() => {
+                    const next = !naturalMode;
+                    setNaturalMode(next);
+                    if (simRef.current) {
+                      simRef.current.naturalMode = next;
+                    }
+                  }}
+                  style={{
+                    background: naturalMode ? theme.primary : "#30363d",
+                    color: naturalMode ? "#000" : "#fff",
+                    border: "none",
+                    borderRadius: "20px",
+                    padding: "3px 12px",
+                    fontSize: "10px",
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    transition: "all 0.2s"
+                  }}
+                >
+                  {naturalMode ? '🟢 開啟' : '⚫ 關閉'}
+                </button>
+              </div>
+
+              {/* Time Adjuster */}
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: "6px" }}>
+                <span style={{ fontSize: "11px", color: theme.textMuted }}>調整虛擬時間</span>
+                <input
+                  type="time"
+                  value={getClockTimeHHMM()}
+                  onChange={(e) => handleTimeChange(e.target.value)}
+                  style={{
+                    background: "#161b22",
+                    border: "1px solid rgba(255,255,255,0.15)",
+                    borderRadius: "4px",
+                    color: "#fff",
+                    padding: "2px 6px",
+                    fontSize: "12px",
+                    fontFamily: "monospace",
+                    cursor: "pointer"
+                  }}
+                />
+              </div>
+
+              {/* Time Presets */}
+              <div style={{ display: "flex", gap: "4px", flexWrap: "wrap" }}>
+                {[
+                  { label: "🌅 朝峰", time: "07:30" },
+                  { label: "☀️ 午間", time: "12:30" },
+                  { label: "🌇 暮峰", time: "17:30" },
+                  { label: "🌌 夜晚", time: "23:00" }
+                ].map(p => (
+                  <button
+                    key={p.time}
+                    onClick={() => handleTimeChange(p.time)}
+                    style={{
+                      flex: 1,
+                      background: "rgba(255,255,255,0.05)",
+                      color: theme.secondary,
+                      border: "1px solid rgba(102,252,241,0.1)",
+                      borderRadius: "4px",
+                      padding: "2px 0",
+                      fontSize: "9px",
+                      cursor: "pointer",
+                      transition: "all 0.2s"
+                    }}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Multiplier Adjustment */}
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: "6px" }}>
+                <span style={{ fontSize: "11px", color: theme.textMuted }}>模擬步進加速 (Time Warp)</span>
+              </div>
+              <div style={{ display: "flex", gap: "3px", flexWrap: "wrap" }}>
+                {[1, 2, 5, 10, 20, 50, 100].map(m => (
+                  <button
+                    key={m}
+                    onClick={() => setSimMultiplier(m)}
+                    style={{
+                      flex: 1,
+                      minWidth: "28px",
+                      background: simMultiplier === m ? theme.primary : "rgba(255,255,255,0.05)",
+                      color: simMultiplier === m ? "#000" : "#fff",
+                      border: "none",
+                      borderRadius: "4px",
+                      padding: "3px 0",
+                      fontSize: "9px",
+                      fontWeight: "bold",
+                      cursor: "pointer",
+                      transition: "all 0.2s"
+                    }}
+                  >
+                    {m}x
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Scrollable Parameters List */}
+            <div style={{
+              flex: 1,
+              overflowY: "auto",
+              overflowX: "hidden",
+              display: "flex",
+              flexDirection: "column",
+              gap: "14px",
+              paddingRight: "6px"
+            }}>
               <div>
                 <label style={{ display: "block", fontSize: "12px", color: theme.textMuted, marginBottom: "4px" }}>亂數種子 (Random Seed)</label>
                 <input
@@ -1947,166 +2129,7 @@ export default function TrafficSimSpec() {
             </div>
 
 
-            <hr style={{ borderColor: "rgba(255,255,255,0.06)", margin: "20px 0" }} />
-
-            {/* Virtual Clock + Natural Mode */}
-            <div style={{
-              background: "rgba(10,15,24,0.6)",
-              border: "1px solid rgba(102,252,241,0.15)",
-              borderRadius: "10px",
-              padding: "12px 14px",
-              marginBottom: "14px"
-            }}>
-              {/* Clock display */}
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
-                <span style={{ fontSize: "10px", color: theme.textMuted, textTransform: "uppercase", letterSpacing: "0.06em" }}>虛擬時鐘 (24h)</span>
-                <span style={{ fontFamily: "monospace", fontSize: "20px", fontWeight: 700, color: theme.primary, letterSpacing: "0.12em" }}>
-                  {clockDisplay || '07:00:00'}
-                </span>
-              </div>
-              {clockPeriod && naturalMode && (
-                <div style={{ textAlign: "center", fontSize: "11px", color: theme.secondary, marginBottom: "8px" }}>{clockPeriod}</div>
-              )}
-              {/* Natural Mode toggle */}
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "10px" }}>
-                <span style={{ fontSize: "11px", color: theme.textMuted }}>自然流量模式 (上下班尖峰)</span>
-                <button
-                  id="natural-mode-toggle"
-                  onClick={() => {
-                    const next = !naturalMode;
-                    setNaturalMode(next);
-                    if (simRef.current) {
-                      simRef.current.naturalMode = next;
-                    }
-                  }}
-                  style={{
-                    background: naturalMode ? theme.primary : "#30363d",
-                    color: naturalMode ? "#000" : "#fff",
-                    border: "none",
-                    borderRadius: "20px",
-                    padding: "4px 14px",
-                    fontSize: "11px",
-                    fontWeight: 700,
-                    cursor: "pointer",
-                    transition: "all 0.2s"
-                  }}
-                >
-                  {naturalMode ? '🟢 開啟' : '⚫ 關閉'}
-                </button>
-              </div>
-
-              {/* Time Adjuster */}
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: "10px", borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: "10px" }}>
-                <span style={{ fontSize: "11px", color: theme.textMuted }}>調整虛擬時間</span>
-                <input
-                  type="time"
-                  value={getClockTimeHHMM()}
-                  onChange={(e) => handleTimeChange(e.target.value)}
-                  style={{
-                    background: "#161b22",
-                    border: "1px solid rgba(255,255,255,0.15)",
-                    borderRadius: "4px",
-                    color: "#fff",
-                    padding: "2px 6px",
-                    fontSize: "12px",
-                    fontFamily: "monospace",
-                    cursor: "pointer"
-                  }}
-                />
-              </div>
-
-              {/* Time Presets */}
-              <div style={{ display: "flex", gap: "4px", marginTop: "8px", flexWrap: "wrap" }}>
-                {[
-                  { label: "🌅 朝峰", time: "07:30" },
-                  { label: "☀️ 午間", time: "12:30" },
-                  { label: "🌇 暮峰", time: "17:30" },
-                  { label: "🌌 夜晚", time: "23:00" }
-                ].map(p => (
-                  <button
-                    key={p.time}
-                    onClick={() => handleTimeChange(p.time)}
-                    style={{
-                      flex: 1,
-                      background: "rgba(255,255,255,0.05)",
-                      color: theme.secondary,
-                      border: "1px solid rgba(102,252,241,0.1)",
-                      borderRadius: "4px",
-                      padding: "3px 0",
-                      fontSize: "10px",
-                      cursor: "pointer",
-                      transition: "all 0.2s"
-                    }}
-                  >
-                    {p.label}
-                  </button>
-                ))}
-              </div>
-
-              {/* Multiplier Adjustment */}
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: "10px", borderTop: "1px solid rgba(255,255,255,0.08)", paddingTop: "10px" }}>
-                <span style={{ fontSize: "11px", color: theme.textMuted }}>模擬步進加速 (Time Warp)</span>
-              </div>
-              <div style={{ display: "flex", gap: "4px", marginTop: "6px", flexWrap: "wrap" }}>
-                {[1, 2, 5, 10, 20, 50, 100].map(m => (
-                  <button
-                    key={m}
-                    onClick={() => setSimMultiplier(m)}
-                    style={{
-                      flex: 1,
-                      minWidth: "32px",
-                      background: simMultiplier === m ? theme.primary : "rgba(255,255,255,0.05)",
-                      color: simMultiplier === m ? "#000" : "#fff",
-                      border: "none",
-                      borderRadius: "4px",
-                      padding: "4px 0",
-                      fontSize: "10px",
-                      fontWeight: "bold",
-                      cursor: "pointer",
-                      transition: "all 0.2s"
-                    }}
-                  >
-                    {m}x
-                  </button>
-                ))}
-              </div>
             </div>
-
-            <div style={{ display: "flex", gap: "10px" }}>
-              <button
-                onClick={togglePlay}
-                style={{
-                  flex: 1,
-                  background: isPlaying ? theme.warning : theme.success,
-                  color: "#000",
-                  fontWeight: "bold",
-                  border: "none",
-                  padding: "10px",
-                  borderRadius: "6px",
-                  cursor: "pointer",
-                  fontSize: "13px"
-                }}
-              >
-                {isPlaying ? "暫停" : "播放"}
-              </button>
-              <button
-                onClick={initializeSimulation}
-                style={{
-                  flex: 1,
-                  background: "#30363d",
-                  color: "#fff",
-                  fontWeight: "bold",
-                  border: "none",
-                  padding: "10px",
-                  borderRadius: "6px",
-                  cursor: "pointer",
-                  fontSize: "13px"
-                }}
-              >
-                重置
-              </button>
-            </div>
-          </div>
 
           {/* Canvas & Real-time Stats */}
           <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
