@@ -20,6 +20,14 @@ const theme = {
 };
 
 export default function TrafficSimSpec() {
+  // Safely check and retrieve build metadata injected during compilation
+  const buildInfo = typeof __BUILD_METADATA__ !== "undefined" ? __BUILD_METADATA__ : {
+    version: "v1.7.2",
+    commitHash: "Dev",
+    commitDate: "N/A",
+    buildTime: "Local Build"
+  };
+
   const [activeTab, setActiveTab] = useState("visualizer");
 
   // Simulation State
@@ -1314,7 +1322,9 @@ export default function TrafficSimSpec() {
               borderRadius: "6px",
               fontWeight: 500,
               marginLeft: "10px"
-            }}>v1.7.2</span>
+            }} title={`Built on: ${buildInfo.buildTime}`}>
+              {buildInfo.version} ({buildInfo.commitHash})
+            </span>
           </h1>
           <p style={{ margin: 0, fontSize: "14px", color: theme.textMuted }}>
             基於雙車道元胞自動機 (CA) 研究空間尺度綠波協調及極端利己駕駛行為 (切車/尾隨)
