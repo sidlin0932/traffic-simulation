@@ -363,6 +363,45 @@ export default function TrafficSimSpec() {
     return 'straight';
   };
 
+  // Handle URL config loading on mount
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const configParam = params.get("config");
+    if (configParam) {
+      try {
+        let decoded = "";
+        try {
+          decoded = atob(configParam);
+        } catch (e) {
+          decoded = decodeURIComponent(configParam);
+        }
+        const parsed = JSON.parse(decoded);
+        
+        if (parsed.seed !== undefined) setSeed(Number(parsed.seed));
+        if (parsed.steps !== undefined) setSteps(Number(parsed.steps));
+        if (parsed.density !== undefined) setDensity(Number(parsed.density));
+        if (parsed.densityHFwd !== undefined) setDensityHFwd(Number(parsed.densityHFwd));
+        if (parsed.densityHBwd !== undefined) setDensityHBwd(Number(parsed.densityHBwd));
+        if (parsed.deltaT !== undefined) setDeltaT(Number(parsed.deltaT));
+        if (parsed.pChangeBg !== undefined) setPChangeBg(Number(parsed.pChangeBg));
+        if (parsed.pChangeSub !== undefined) setPChangeSub(Number(parsed.pChangeSub));
+        if (parsed.turnProbability !== undefined) setTurnProbability(Number(parsed.turnProbability));
+        if (parsed.signalMode !== undefined) setSignalMode(parsed.signalMode);
+        if (parsed.hRoads !== undefined) setHRoads(parsed.hRoads);
+        if (parsed.vRoads !== undefined) setVRoads(parsed.vRoads);
+        if (parsed.intersectionRules !== undefined) setIntersectionRules(parsed.intersectionRules);
+        
+        setTimeout(() => {
+          initializeSimulation();
+        }, 150);
+        
+        console.log("Successfully loaded simulation configuration from URL parameters:", parsed);
+      } catch (err) {
+        console.error("Failed to parse URL config:", err);
+      }
+    }
+  }, []);
+
   useEffect(() => {
     if (skipReinitRef.current) {
       skipReinitRef.current = false;
@@ -1166,7 +1205,7 @@ export default function TrafficSimSpec() {
               borderRadius: "6px",
               fontWeight: 500,
               marginLeft: "10px"
-            }}>v1.7.1-hotfix-clearance</span>
+            }}>v1.7.2</span>
           </h1>
           <p style={{ margin: 0, fontSize: "14px", color: theme.textMuted }}>
             基於雙車道元胞自動機 (CA) 研究空間尺度綠波協調及極端利己駕駛行為 (切車/尾隨)

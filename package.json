@@ -1,14 +1,16 @@
 {
   "name": "-",
   "private": true,
-  "version": "1.7.1",
+  "version": "1.7.2",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "server": "node server.js",
     "build": "vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "sim": "node scripts/run_sim_cli.js",
+    "batch": "node scripts/batch_run.js"
   },
   "dependencies": {
     "cors": "^2.8.5",

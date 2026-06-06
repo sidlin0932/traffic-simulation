@@ -100,7 +100,11 @@ for (const seed of SEEDS) {
       });
 
       if (isAnomalous) {
+        const b64 = Buffer.from(JSON.stringify(reproduceConfig)).toString('base64');
         console.warn(`  ⚠️  Anomalous Traffic Wave Detected! Phantom jams: ${metrics.phantom_jams_detected}, Avg Delay: ${metrics.avg_delay_background.toFixed(1)} ticks.`);
+        console.warn(`     🔗 完美重現 GUI 連結 (Ctrl+Click 開啟):`);
+        console.warn(`        - Local Dev: http://localhost:5173/?config=${b64}`);
+        console.warn(`        - Local Server: http://localhost:3000/?config=${b64}`);
       }
     }
   }
