@@ -129,6 +129,7 @@ export class GridSimulation {
     // Dynamic Road Definitions
     this.hRoads = config.hRoads || defaultHRoads;
     this.vRoads = config.vRoads || defaultVRoads;
+    this.intersectionRules = config.intersectionRules || {};
 
     // Per-direction inflow rates (0.0 ~ 1.0), mapped from road configurations.
     this.roadInflowHFwd = this.hRoads.map(r => r.inflowFwd);
@@ -231,6 +232,100 @@ export class GridSimulation {
 
     // Initialize roads with background cars
     this.populateInitialVehicles();
+  }
+
+  getLaneTurnRule(roadType, idx, lane, nextInterIdx) {
+    if (nextInterIdx === -1) return 'straight';
+    const isH = roadType === 'hFwd' || roadType === 'hBwd';
+    const interR = isH ? idx : nextInterIdx;
+    const interC = isH ? nextInterIdx : idx;
+    const key = `${interR}-${interC}`;
+    const customRules = this.intersectionRules[key]?.[roadType];
+    if (customRules && customRules[lane]) {
+      return customRules[lane];
+    }
+    const totalLanes = this.getRoad(roadType, idx).length;
+    if (totalLanes === 1) return 'all';
+    if (totalLanes === 2) return lane === 0 ? 'left' : 'right';
+    if (lane === 0) return 'left';
+    if (lane === totalLanes - 1) return 'right';
+    return 'straight';
+  }
+
+  updateRoadTier(roadType, idx, newTier) {
+    const isH = roadType === 'hFwd' || roadType === 'hBwd';
+    const road = isH ? this.hRoads[idx] : this.vRoads[idx];
+    road.tier = newTier;
+    const isPrimary = (rOrC) => {
+      const rd = isH ? this.hRoads[rOrC] : this.vRoads[rOrC];
+      return rd.tier === 'primary';
+    };
+    const isSecondary = (rOrC) => {
+      const rd = isH ? this.hRoads[rOrC] : this.vRoads[rOrC];
+      return rd.tier === 'secondary';
+    };
+    const getLanesCount = (mode, isFwd) => {
+      if (mode === "peak_fwd") return isFwd ? 4 : 2;
+      if (mode === "peak_bwd") return isFwd ? 2 : 4;
+      return 3;
+    };
+    const getSecondaryLanesCount = (mode, isFwd) => {
+      if (mode === "peak_fwd") return isFwd ? 3 : 1;
+      if (mode === "peak_bwd") return isFwd ? 1 : 3;
+      return 2;
+    };
+    const getNewCount = (fwd) => {
+      const revMode = road.revMode || "none";
+      return isPrimary(idx) ? getLanesCount(revMode, fwd)
+           : isSecondary(idx) ? getSecondaryLanesCount(revMode, fwd)
+           : 1;
+    };
+    const fwdType = isH ? 'hFwd' : 'vFwd';
+    const bwdType = isH ? 'hBwd' : 'vBwd';
+    const fwdRd = this.getRoad(fwdType, idx);
+    const bwdRd = this.getRoad(bwdType, idx);
+    const targetFwdCount = getNewCount(true);
+    const targetBwdCount = getNewCount(false);
+    const maxLen = isH ? this.g.HLEN : this.g.VLEN;
+
+    while (fwdRd.length < targetFwdCount) {
+      fwdRd.push(new Array(maxLen).fill(null));
+    }
+    if (fwdRd.length > targetFwdCount) {
+      for (let l = targetFwdCount; l < fwdRd.length; l++) {
+        for (let x = 0; x < maxLen; x++) {
+          const car = fwdRd[l][x];
+          if (car) this.vehicles = this.vehicles.filter(v => v.id !== car.id);
+        }
+      }
+      fwdRd.splice(targetFwdCount);
+    }
+    while (bwdRd.length < targetBwdCount) {
+      bwdRd.push(new Array(maxLen).fill(null));
+    }
+    if (bwdRd.length > targetBwdCount) {
+      for (let l = targetBwdCount; l < bwdRd.length; l++) {
+        for (let x = 0; x < maxLen; x++) {
+          const car = bwdRd[l][x];
+          if (car) this.vehicles = this.vehicles.filter(v => v.id !== car.id);
+        }
+      }
+      bwdRd.splice(targetBwdCount);
+    }
+  }
+
+  updateInflowRate(roadType, idx, newInflow) {
+    const isH = roadType === 'hFwd' || roadType === 'hBwd';
+    const road = isH ? this.hRoads[idx] : this.vRoads[idx];
+    if (roadType === 'hFwd' || roadType === 'vFwd') {
+      road.inflowFwd = newInflow;
+    } else {
+      road.inflowBwd = newInflow;
+    }
+    if (roadType === 'hFwd') this.roadInflowHFwd[idx] = newInflow;
+    else if (roadType === 'hBwd') this.roadInflowHBwd[idx] = newInflow;
+    else if (roadType === 'vFwd') this.roadInflowVFwd[idx] = newInflow;
+    else if (roadType === 'vBwd') this.roadInflowVBwd[idx] = newInflow;
   }
 
   // Initialize Traffic Light status
@@ -570,6 +665,23 @@ export class GridSimulation {
           nextInterCoord = actualP;
         }
       }
+
+      // Solid White Line constraint: no lane changing allowed in the solid line zone near intersections
+      let inSolidZone = false;
+      const SOLID_LINE_ZONE_CELLS = 8;
+      for (const p of intersections) {
+        const actualP = (roadType === 'hBwd' || roadType === 'vBwd') ? mirror(p, maxLen) : p;
+        const dist = actualP - x;
+        if (dist > 0 && dist <= SOLID_LINE_ZONE_CELLS) {
+          inSolidZone = true;
+          break;
+        }
+      }
+      if (inSolidZone && car.type !== 'emergency') {
+        continue;
+      }
+
+      // Calculate distance to next intersection to check for turning lane incentives
       const distToNextInter = nextInterCoord - x;
       const approachingIntersection = distToNextInter <= 12;
 
@@ -584,9 +696,21 @@ export class GridSimulation {
         // Turn lane incentive: if approaching intersection, vehicle is motivated to move to the correct lane
         let incentive = dCurr < vDes && dTarget > dCurr;
         if (approachingIntersection) {
-          if (car.nextTurn === 'left' && targetLane === currLane - 1) {
-            incentive = true;
-          } else if (car.nextTurn === 'right' && targetLane === currLane + 1) {
+          let nextInterIdx = -1;
+          for (let i = 0; i < intersections.length; i++) {
+            const p = intersections[i];
+            const actualP = (roadType === 'hBwd' || roadType === 'vBwd') ? mirror(p, maxLen) : p;
+            if (actualP > x && actualP === nextInterCoord) {
+              nextInterIdx = i;
+              break;
+            }
+          }
+          const currRule = this.getLaneTurnRule(roadType, idx, currLane, nextInterIdx);
+          const targetRule = this.getLaneTurnRule(roadType, idx, targetLane, nextInterIdx);
+          const wants = car.nextTurn || 'straight';
+          const currAllows = currRule === 'all' || currRule === wants;
+          const targetAllows = targetRule === 'all' || targetRule === wants;
+          if (!currAllows && targetAllows) {
             incentive = true;
           }
         }
@@ -833,10 +957,14 @@ export class GridSimulation {
 
           // Check if turning is allowed by lane restrictions (ROC traffic rules)
           let turnDecision = car.nextTurn || 'straight';
-          if (turnDecision === 'left' && lane !== 0) {
-            turnDecision = 'straight'; // Forced straight if not in Left-turn lane (Lane 0)
-          } else if (turnDecision === 'right' && lane !== totalLanes - 1) {
-            turnDecision = 'straight'; // Forced straight if not in Right-turn lane (Lane N-1)
+          const nextInterIdx = isH ? c : r;
+          const rule = this.getLaneTurnRule(roadType, idx, lane, nextInterIdx);
+          if (rule === 'left') {
+            turnDecision = 'left';
+          } else if (rule === 'right') {
+            turnDecision = 'right';
+          } else if (rule === 'straight') {
+            turnDecision = 'straight';
           }
 
           if (turnDecision !== 'straight') {
@@ -937,7 +1065,7 @@ export class GridSimulation {
     const idx = 0;
     const numSectors = Math.ceil(this.g.HLEN / this.sectorSize);
 
-    for (let lane = 0; lane < 3; lane++) {
+    for (let lane = 0; lane < this.hFwd[idx].length; lane++) {
       const currentSpeeds = new Array(numSectors).fill(0);
       const vehicleCounts = new Array(numSectors).fill(0);
 

@@ -43,7 +43,10 @@ app.post('/api/v1/simulation/run', (req, res) => {
       const result = runExperimentASweep(random_seed, delta_t, background_density);
       return res.json(result);
     } else {
-      // Run normal or B1/B2
+      const finalHRoads = h_roads || hRoads;
+      const finalVRoads = v_roads || vRoads;
+      const finalIntersectionRules = req.body.intersection_rules || req.body.intersectionRules || {};
+
       const sim = new GridSimulation({
         roadLength: road_length,
         simulationSteps: simulation_steps,
@@ -52,12 +55,27 @@ app.post('/api/v1/simulation/run', (req, res) => {
         experimentType: experiment_type,
         exportTrajectories: export_trajectories,
         signalMode: req.body.signal_mode || 'alternating',
-        hRoads: h_roads || hRoads,
-        vRoads: v_roads || vRoads,
+        hRoads: finalHRoads,
+        vRoads: finalVRoads,
+        intersectionRules: finalIntersectionRules,
         params
       });
 
       const result = sim.run();
+      result.reproduce_config = {
+        seed: random_seed,
+        steps: simulation_steps,
+        density: background_density,
+        deltaT: params.delta_t || 30,
+        pChangeBg: params.p_change_background || 0.1,
+        pChangeSub: params.p_change_subject || 1.0,
+        turnProbability: params.turn_probability || 0.15,
+        signalMode: req.body.signal_mode || 'alternating',
+        hRoads: finalHRoads,
+        vRoads: finalVRoads,
+        intersectionRules: finalIntersectionRules
+      };
+
       return res.json(result);
     }
   } catch (error) {

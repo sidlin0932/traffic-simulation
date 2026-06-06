@@ -81,6 +81,13 @@ export default function TrafficSimSpec() {
   // carId -> { prevLane, progress }
   const laneInterpolation = useRef(new Map());
 
+  const [intersectionRules, setIntersectionRules] = useState({});
+  const [selectedIntersection, setSelectedIntersection] = useState(null);
+  const [selectedRoadConfig, setSelectedRoadConfig] = useState(null);
+  const [showConfigModal, setShowConfigModal] = useState(false);
+  const [importExportText, setImportExportText] = useState("");
+  const skipReinitRef = useRef(false);
+
   // Initialize Simulation on config change
   const initializeSimulation = () => {
     setIsPlaying(false);
@@ -91,6 +98,7 @@ export default function TrafficSimSpec() {
       seed: seed,
       hRoads: hRoads,
       vRoads: vRoads,
+      intersectionRules: intersectionRules,
       simulationSteps: steps,
       experimentType: expType,
       exportTrajectories: true,
@@ -336,7 +344,30 @@ export default function TrafficSimSpec() {
     return { px, py };
   };
 
+  const getLaneArrowType = (roadType, idx, lane, nextInterIdx) => {
+    const isH = roadType === 'hFwd' || roadType === 'hBwd';
+    const interR = isH ? idx : nextInterIdx;
+    const interC = isH ? nextInterIdx : idx;
+    const key = `${interR}-${interC}`;
+    const customRules = intersectionRules[key]?.[roadType];
+    if (customRules && customRules[lane]) {
+      return customRules[lane];
+    }
+    const totalLanes = sim ? sim.getRoad(roadType, idx).length : 3;
+    if (totalLanes === 1) return 'all';
+    if (totalLanes === 2) {
+      return lane === 0 ? 'left' : 'right';
+    }
+    if (lane === 0) return 'left';
+    if (lane === totalLanes - 1) return 'right';
+    return 'straight';
+  };
+
   useEffect(() => {
+    if (skipReinitRef.current) {
+      skipReinitRef.current = false;
+      return;
+    }
     initializeSimulation();
     return () => {
       if (animationRef.current) clearInterval(animationRef.current);
@@ -631,7 +662,7 @@ export default function TrafficSimSpec() {
         for (let c = 0; c < g.NUM_V; c++) {
           if (!g.present[r][c]) continue;
           const stopX = vRoadX(c) + getRoadWidthV(c);
-          const endX = Math.min(PAD + g.HLEN * C, stopX + 6 * C);
+          const endX = Math.min(PAD + g.HLEN * C, stopX + 8 * C);
           ctx.beginPath(); ctx.moveTo(stopX, yL); ctx.lineTo(endX, yL); ctx.stroke();
         }
       }
@@ -647,7 +678,7 @@ export default function TrafficSimSpec() {
         for (let c = 0; c < g.NUM_V; c++) {
           if (!g.present[r][c]) continue;
           const stopX = vRoadX(c);
-          const startX = Math.max(PAD, stopX - 6 * C);
+          const startX = Math.max(PAD, stopX - 8 * C);
           ctx.beginPath(); ctx.moveTo(startX, yL); ctx.lineTo(stopX, yL); ctx.stroke();
         }
       }
@@ -673,18 +704,14 @@ export default function TrafficSimSpec() {
         // hBwd Arrows (driver goes West <-, rot = Math.PI, top half)
         const xArrowBwd = vRoadX(c) + getRoadWidthV(c) + 2 * C + C / 2;
         for (let l = 0; l < bwdCount; l++) {
-          let type = "straight";
-          if (l === bwdCount - 1) type = "straight_left";
-          else if (l === 0) type = "straight_right";
+          const type = getLaneArrowType('hBwd', r, l, c);
           drawVectorArrow(xArrowBwd, y0 + l * (C + LANE_GAP) + C / 2, Math.PI, type);
         }
 
         // hFwd Arrows (driver goes East ->, rot = 0, bottom half)
         const xArrow = vRoadX(c) - 3 * C + C / 2;
         for (let l = 0; l < fwdCount; l++) {
-          let type = "straight";
-          if (l === 0) type = "straight_left";
-          else if (l === fwdCount - 1) type = "straight_right";
+          const type = getLaneArrowType('hFwd', r, l, c);
           drawVectorArrow(xArrow, y0 + (bwdCount + l) * (C + LANE_GAP) + C / 2, 0, type);
         }
       }
@@ -718,7 +745,7 @@ export default function TrafficSimSpec() {
         for (let r = 0; r < g.NUM_H; r++) {
           if (!g.present[r][c]) continue;
           const stopY = hRoadY(r);
-          const startY = Math.max(PAD, stopY - 6 * C);
+          const startY = Math.max(PAD, stopY - 8 * C);
           ctx.beginPath(); ctx.moveTo(xL, startY); ctx.lineTo(xL, stopY); ctx.stroke();
         }
       }
@@ -733,7 +760,7 @@ export default function TrafficSimSpec() {
         for (let r = 0; r < g.NUM_H; r++) {
           if (!g.present[r][c]) continue;
           const stopY = hRoadY(r) + getRoadWidthH(r);
-          const endY = Math.min(PAD + g.VLEN * C, stopY + 6 * C);
+          const endY = Math.min(PAD + g.VLEN * C, stopY + 8 * C);
           ctx.beginPath(); ctx.moveTo(xL, stopY); ctx.lineTo(xL, endY); ctx.stroke();
         }
       }
@@ -759,18 +786,14 @@ export default function TrafficSimSpec() {
         // vFwd Arrows (driver goes South |v, rot = Math.PI / 2, left half)
         const yArrow = hRoadY(r) - 3 * C + C / 2;
         for (let l = 0; l < fwdCount; l++) {
-          let type = "straight";
-          if (l === fwdCount - 1) type = "straight_left";
-          else if (l === 0) type = "straight_right";
+          const type = getLaneArrowType('vFwd', c, l, r);
           drawVectorArrow(x0 + l * (C + LANE_GAP) + C / 2, yArrow, Math.PI / 2, type);
         }
 
         // vBwd Arrows (driver goes North ^|, rot = Math.PI * 1.5, right half)
         const yArrowBwd = hRoadY(r) + getRoadWidthH(r) + 2 * C + C / 2;
         for (let l = 0; l < bwdCount; l++) {
-          let type = "straight";
-          if (l === 0) type = "straight_left";
-          else if (l === bwdCount - 1) type = "straight_right";
+          const type = getLaneArrowType('vBwd', c, l, r);
           drawVectorArrow(x0 + (fwdCount + l) * (C + LANE_GAP) + C / 2, yArrowBwd, Math.PI * 1.5, type);
         }
       }
@@ -889,7 +912,38 @@ export default function TrafficSimSpec() {
       ctx.fill();
     });
 
-  }, [tick, activeVehicles, sim, trackedVehicleId]);
+    // 5. Draw Road Entrance Configuration Dots (Amber)
+    ctx.fillStyle = "#c5a059";
+    for (let r = 0; r < g.NUM_H; r++) {
+      // Horizontal Forward entrance (West end, bottom half)
+      const yFwd = hRoadY(r) + getRoadWidthH(r) - 5;
+      ctx.beginPath(); ctx.arc(PAD - 8, yFwd, 3, 0, Math.PI * 2); ctx.fill();
+
+      // Horizontal Backward entrance (East end, top half)
+      const yBwd = hRoadY(r) + 5;
+      ctx.beginPath(); ctx.arc(PAD + g.HLEN * C + 8, yBwd, 3, 0, Math.PI * 2); ctx.fill();
+    }
+    for (let c = 0; c < g.NUM_V; c++) {
+      // Vertical Forward entrance (North end, left half)
+      const xFwd = vRoadX(c) + 5;
+      ctx.beginPath(); ctx.arc(xFwd, PAD - 8, 3, 0, Math.PI * 2); ctx.fill();
+
+      // Vertical Backward entrance (South end, right half)
+      const xBwd = vRoadX(c) + getRoadWidthV(c) - 5;
+      ctx.beginPath(); ctx.arc(xBwd, PAD + g.VLEN * C + 8, 3, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // 6. Draw Intersection Customization Center Dots (Teal)
+    ctx.fillStyle = "rgba(102, 252, 241, 0.6)";
+    for (let r = 0; r < g.NUM_H; r++) {
+      for (let c = 0; c < g.NUM_V; c++) {
+        const cx = vRoadX(c) + getRoadWidthV(c) / 2;
+        const cy = hRoadY(r) + getRoadWidthH(r) / 2;
+        ctx.beginPath(); ctx.arc(cx, cy, 3, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+
+  }, [tick, activeVehicles, sim, trackedVehicleId, intersectionRules]);
 
   // Click on Canvas to Inspect Car in Grid
   const handleCanvasClick = (e) => {
@@ -934,8 +988,75 @@ export default function TrafficSimSpec() {
 
     if (closestCar) {
       setTrackedVehicleId(closestCar.id);
+      setSelectedIntersection(null);
+      setSelectedRoadConfig(null);
     } else {
       setTrackedVehicleId(null);
+      
+      // 1. Check if clicked near a Road Entrance Dot (Amber, radius 3px)
+      let closestRoad = null;
+      let minRoadDist = 12; // Click radius
+      for (let r = 0; r < g.NUM_H; r++) {
+        // Horizontal Forward entrance (West end)
+        const yFwd = hRoadY(r) + getRoadWidthH(r) - 5;
+        let dist = Math.sqrt((x - (PAD - 8)) ** 2 + (y - yFwd) ** 2);
+        if (dist < minRoadDist) {
+          minRoadDist = dist;
+          closestRoad = { roadType: 'hFwd', idx: r, px: PAD - 8, py: yFwd };
+        }
+        // Horizontal Backward entrance (East end)
+        const yBwd = hRoadY(r) + 5;
+        dist = Math.sqrt((x - (PAD + g.HLEN * C + 8)) ** 2 + (y - yBwd) ** 2);
+        if (dist < minRoadDist) {
+          minRoadDist = dist;
+          closestRoad = { roadType: 'hBwd', idx: r, px: PAD + g.HLEN * C + 8, py: yBwd };
+        }
+      }
+      for (let c = 0; c < g.NUM_V; c++) {
+        // Vertical Forward entrance (North end)
+        const xFwd = vRoadX(c) + 5;
+        let dist = Math.sqrt((x - xFwd) ** 2 + (y - (PAD - 8)) ** 2);
+        if (dist < minRoadDist) {
+          minRoadDist = dist;
+          closestRoad = { roadType: 'vFwd', idx: c, px: xFwd, py: PAD - 8 };
+        }
+        // Vertical Backward entrance (South end)
+        const xBwd = vRoadX(c) + getRoadWidthV(c) - 5;
+        dist = Math.sqrt((x - xBwd) ** 2 + (y - (PAD + g.VLEN * C + 8)) ** 2);
+        if (dist < minRoadDist) {
+          minRoadDist = dist;
+          closestRoad = { roadType: 'vBwd', idx: c, px: xBwd, py: PAD + g.VLEN * C + 8 };
+        }
+      }
+
+      if (closestRoad) {
+        setSelectedRoadConfig(closestRoad);
+        setSelectedIntersection(null);
+        return;
+      }
+
+      // 2. Check if clicked near an Intersection center (Teal, radius 3px)
+      let closestInter = null;
+      let minInterDist = 15; // Click radius
+      for (let r = 0; r < g.NUM_H; r++) {
+        for (let c = 0; c < g.NUM_V; c++) {
+          const cx = vRoadX(c) + getRoadWidthV(c) / 2;
+          const cy = hRoadY(r) + getRoadWidthH(r) / 2;
+          const dist = Math.sqrt((x - cx) ** 2 + (y - cy) ** 2);
+          if (dist < minInterDist) {
+            minInterDist = dist;
+            closestInter = { r, c, px: cx, py: cy };
+          }
+        }
+      }
+
+      if (closestInter) {
+        setSelectedIntersection(closestInter);
+        setSelectedRoadConfig(null);
+      } else {
+        setSelectedIntersection(null);
+        setSelectedRoadConfig(null);
+      }
     }
   };
 
@@ -1644,10 +1765,34 @@ export default function TrafficSimSpec() {
               border: "1px solid rgba(255,255,255,0.06)",
               borderRadius: "16px",
               padding: "20px",
-              overflowX: "auto"
+              overflowX: "auto",
+              position: "relative"
             }}>
               <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "10px", alignItems: "center" }}>
-                <span style={{ fontSize: "14px", fontWeight: "bold", color: theme.textLight }}>模擬運行狀態 (Tick: {tick} / {steps})</span>
+                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                  <span style={{ fontSize: "14px", fontWeight: "bold", color: theme.textLight }}>模擬運行狀態 (Tick: {tick} / {steps})</span>
+                  <button
+                    onClick={() => {
+                      const config = {
+                        seed, steps, density, densityHFwd, densityHBwd, deltaT, pChangeBg, pChangeSub,
+                        turnProbability, signalMode, hRoads, vRoads, intersectionRules
+                      };
+                      setImportExportText(JSON.stringify(config, null, 2));
+                      setShowConfigModal(true);
+                    }}
+                    style={{
+                      background: "rgba(102, 252, 241, 0.12)",
+                      color: theme.primary,
+                      border: "1px solid rgba(102, 252, 241, 0.3)",
+                      borderRadius: "6px",
+                      fontSize: "11px",
+                      padding: "2px 8px",
+                      cursor: "pointer"
+                    }}
+                  >
+                    ⚙️ 匯入/匯出配置
+                  </button>
+                </div>
                 <div style={{ display: "flex", gap: "14px", fontSize: "12px" }}>
                   <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
                     <span style={{ width: "10px", height: "10px", borderRadius: "50%", background: "linear-gradient(to bottom, #22d3ee, #0369a1)" }}></span> 背景車
@@ -1686,8 +1831,273 @@ export default function TrafficSimSpec() {
                 }}
               />
               <p style={{ margin: "8px 0 0 0", fontSize: "11px", color: theme.textMuted, textAlign: "center" }}>
-                提示：點擊車輛可進行「微觀軌跡追蹤」
+                提示：點擊車輛進行軌跡追蹤；點擊路口中心 ⚙️ 調節轉向；點擊道路端點 ⚙️ 調節車道與車流
               </p>
+
+              {/* Floating Cards and Overlays */}
+              {selectedIntersection && (
+                <div style={{
+                  position: "absolute",
+                  left: `${selectedIntersection.px + 15}px`,
+                  top: `${selectedIntersection.py + 15}px`,
+                  background: "rgba(31, 40, 51, 0.95)",
+                  border: "2px solid " + theme.primary,
+                  borderRadius: "12px",
+                  padding: "16px",
+                  width: "280px",
+                  zIndex: 1000,
+                  boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
+                  backdropFilter: "blur(8px)",
+                }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+                    <strong style={{ color: theme.textLight, fontSize: "13px" }}>
+                      路口 (H{selectedIntersection.r}, V{selectedIntersection.c}) 轉向車道自訂
+                    </strong>
+                    <button 
+                      onClick={() => setSelectedIntersection(null)}
+                      style={{ background: "transparent", color: theme.textMuted, border: "none", cursor: "pointer", fontSize: "16px" }}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "12px", maxHeight: "250px", overflowY: "auto", paddingRight: "4px" }}>
+                    {[
+                      { label: "⬅️ 西側入口 (向東)", roadType: "hFwd", idx: selectedIntersection.r },
+                      { label: "➡️ 東側入口 (向西)", roadType: "hBwd", idx: selectedIntersection.r },
+                      { label: "⬇️ 北側入口 (向南)", roadType: "vFwd", idx: selectedIntersection.c },
+                      { label: "⬆️ 南側入口 (向北)", roadType: "vBwd", idx: selectedIntersection.c },
+                    ].map((leg) => {
+                      const lanes = sim ? sim.getRoad(leg.roadType, leg.idx) : null;
+                      if (!lanes) return null;
+                      const totalLanes = lanes.length;
+                      const key = `${selectedIntersection.r}-${selectedIntersection.c}`;
+                      const currentRules = intersectionRules[key]?.[leg.roadType] || [];
+                      return (
+                        <div key={leg.roadType} style={{ borderBottom: "1px solid rgba(255,255,255,0.06)", paddingBottom: "8px" }}>
+                          <span style={{ fontSize: "11px", color: theme.secondary, fontWeight: "bold" }}>{leg.label}</span>
+                          <div style={{ display: "flex", gap: "6px", marginTop: "4px" }}>
+                            {Array.from({ length: totalLanes }).map((_, l) => {
+                              let val = currentRules[l];
+                              if (!val) {
+                                if (totalLanes === 1) val = "all";
+                                else if (totalLanes === 2) val = (l === 0 ? "left" : "right");
+                                else val = (l === 0 ? "left" : (l === totalLanes - 1 ? "right" : "straight"));
+                              }
+                              return (
+                                <div key={l} style={{ flex: 1, display: "flex", flexDirection: "column", gap: "2px" }}>
+                                  <span style={{ fontSize: "9px", color: theme.textMuted, textAlign: "center" }}>車道 {l}</span>
+                                  <select
+                                    value={val}
+                                    onChange={(e) => {
+                                      const newRules = { ...intersectionRules };
+                                      if (!newRules[key]) newRules[key] = {};
+                                      if (!newRules[key][leg.roadType]) {
+                                        newRules[key][leg.roadType] = Array.from({ length: totalLanes }).map((_, i) => {
+                                          if (totalLanes === 1) return "all";
+                                          if (totalLanes === 2) return (i === 0 ? "left" : "right");
+                                          return (i === 0 ? "left" : (i === totalLanes - 1 ? "right" : "straight"));
+                                        });
+                                      }
+                                      newRules[key][leg.roadType][l] = e.target.value;
+                                      setIntersectionRules(newRules);
+                                      if (simRef.current) {
+                                        simRef.current.intersectionRules = newRules;
+                                      }
+                                    }}
+                                    style={{
+                                      background: "#0b0c10", color: theme.primary, border: "1px solid rgba(255,255,255,0.15)",
+                                      borderRadius: "4px", fontSize: "10px", padding: "2px 4px", cursor: "pointer", outline: "none"
+                                    }}
+                                  >
+                                    <option value="left">左轉 ⬅️</option>
+                                    <option value="straight">直行 ⬆️</option>
+                                    <option value="right">右轉 ➡️</option>
+                                    <option value="all">全開放 🔄</option>
+                                  </select>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {selectedRoadConfig && (
+                <div style={{
+                  position: "absolute",
+                  left: `${selectedRoadConfig.px + 15}px`,
+                  top: `${selectedRoadConfig.py - 50}px`,
+                  background: "rgba(31, 40, 51, 0.95)",
+                  border: "2px solid " + theme.secondary,
+                  borderRadius: "12px",
+                  padding: "16px",
+                  width: "250px",
+                  zIndex: 1001,
+                  boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
+                  backdropFilter: "blur(8px)",
+                }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+                    <strong style={{ color: theme.textLight, fontSize: "13px" }}>
+                      道路設定 ({selectedRoadConfig.roadType.toUpperCase()} {selectedRoadConfig.idx})
+                    </strong>
+                    <button 
+                      onClick={() => setSelectedRoadConfig(null)}
+                      style={{ background: "transparent", color: theme.textMuted, border: "none", cursor: "pointer", fontSize: "16px" }}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                    {/* Road Tier Selector */}
+                    <div>
+                      <label style={{ display: "block", fontSize: "11px", color: theme.textMuted, marginBottom: "4px" }}>道路層級 (車道數)</label>
+                      <select
+                        value={
+                          (selectedRoadConfig.roadType.startsWith('h') ? hRoads[selectedRoadConfig.idx] : vRoads[selectedRoadConfig.idx]).tier
+                        }
+                        onChange={(e) => {
+                          const isH = selectedRoadConfig.roadType.startsWith('h');
+                          const copy = isH ? [...hRoads] : [...vRoads];
+                          copy[selectedRoadConfig.idx].tier = e.target.value;
+                          skipReinitRef.current = true;
+                          if (isH) setHRoads(copy);
+                          else setVRoads(copy);
+                          if (simRef.current) {
+                            simRef.current.updateRoadTier(selectedRoadConfig.roadType, selectedRoadConfig.idx, e.target.value);
+                          }
+                        }}
+                        style={{
+                          width: "100%", background: "#0b0c10", color: "#fff", border: "1px solid rgba(255,255,255,0.15)",
+                          borderRadius: "6px", fontSize: "12px", padding: "6px"
+                        }}
+                      >
+                        <option value="minor">一般道路 (1 車道)</option>
+                        <option value="secondary">次要幹道 (2 車道)</option>
+                        <option value="primary">主要幹道 (3 車道)</option>
+                      </select>
+                    </div>
+                    {/* Inflow Rate Slider */}
+                    <div>
+                      <label style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: theme.textMuted, marginBottom: "4px" }}>
+                        <span>輸入車流率</span>
+                        <span style={{ color: theme.primary, fontWeight: "bold" }}>
+                          {(selectedRoadConfig.roadType.startsWith('h') ? hRoads[selectedRoadConfig.idx] : vRoads[selectedRoadConfig.idx])[selectedRoadConfig.roadType.endsWith('Fwd') ? 'inflowFwd' : 'inflowBwd'].toFixed(2)}
+                        </span>
+                      </label>
+                      <input
+                        type="range"
+                        min="0.0"
+                        max="1.0"
+                        step="0.02"
+                        value={
+                          (selectedRoadConfig.roadType.startsWith('h') ? hRoads[selectedRoadConfig.idx] : vRoads[selectedRoadConfig.idx])[selectedRoadConfig.roadType.endsWith('Fwd') ? 'inflowFwd' : 'inflowBwd']
+                        }
+                        onChange={(e) => {
+                          const val = parseFloat(e.target.value);
+                          const isH = selectedRoadConfig.roadType.startsWith('h');
+                          const copy = isH ? [...hRoads] : [...vRoads];
+                          if (selectedRoadConfig.roadType.endsWith('Fwd')) {
+                            copy[selectedRoadConfig.idx].inflowFwd = val;
+                          } else {
+                            copy[selectedRoadConfig.idx].inflowBwd = val;
+                          }
+                          skipReinitRef.current = true;
+                          if (isH) setHRoads(copy);
+                          else setVRoads(copy);
+                          if (simRef.current) {
+                            simRef.current.updateInflowRate(selectedRoadConfig.roadType, selectedRoadConfig.idx, val);
+                          }
+                        }}
+                        style={{ width: "100%", accentColor: theme.primary }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {showConfigModal && (
+                <div style={{
+                  position: "absolute",
+                  left: "50%",
+                  top: "50%",
+                  transform: "translate(-50%, -50%)",
+                  background: "#1f2833",
+                  border: "2px solid " + theme.primary,
+                  borderRadius: "16px",
+                  padding: "24px",
+                  width: "400px",
+                  zIndex: 2000,
+                  boxShadow: "0 10px 40px rgba(0,0,0,0.6)",
+                  backdropFilter: "blur(10px)"
+                }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+                    <strong style={{ color: theme.textLight, fontSize: "16px" }}>匯入 / 匯出 JSON 模擬配置</strong>
+                    <button 
+                      onClick={() => setShowConfigModal(false)}
+                      style={{ background: "transparent", color: theme.textMuted, border: "none", cursor: "pointer", fontSize: "18px" }}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  <p style={{ fontSize: "11px", color: theme.textMuted, margin: "0 0 12px 0" }}>
+                    您可以複製此 JSON 配置以利於定量分析中完美重現；或是將 AI/自動化腳本生成的 anomalous 配置 JSON 貼在下方，點擊「匯入並載入」完美復現。
+                  </p>
+                  <textarea
+                    value={importExportText}
+                    onChange={(e) => setImportExportText(e.target.value)}
+                    style={{
+                      width: "100%", height: "180px", background: "#0b0c10", color: theme.primary,
+                      fontFamily: "monospace", fontSize: "10px", padding: "8px", borderRadius: "8px",
+                      border: "1px solid rgba(255,255,255,0.15)", resize: "none", outline: "none"
+                    }}
+                  />
+                  <div style={{ display: "flex", gap: "10px", marginTop: "16px" }}>
+                    <button
+                      onClick={() => {
+                        const config = {
+                          seed, steps, density, densityHFwd, densityHBwd, deltaT, pChangeBg, pChangeSub,
+                          turnProbability, signalMode, hRoads, vRoads, intersectionRules
+                        };
+                        setImportExportText(JSON.stringify(config, null, 2));
+                      }}
+                      style={{ flex: 1, padding: "8px", background: "#30363d", color: "#fff", border: "none", borderRadius: "6px", cursor: "pointer", fontSize: "12px" }}
+                    >
+                      生成當前配置 JSON
+                    </button>
+                    <button
+                      onClick={() => {
+                        try {
+                          const parsed = JSON.parse(importExportText);
+                          if (parsed.seed !== undefined) setSeed(parsed.seed);
+                          if (parsed.steps !== undefined) setSteps(parsed.steps);
+                          if (parsed.density !== undefined) setDensity(parsed.density);
+                          if (parsed.densityHFwd !== undefined) setDensityHFwd(parsed.densityHFwd);
+                          if (parsed.densityHBwd !== undefined) setDensityHBwd(parsed.densityHBwd);
+                          if (parsed.deltaT !== undefined) setDeltaT(parsed.deltaT);
+                          if (parsed.pChangeBg !== undefined) setPChangeBg(parsed.pChangeBg);
+                          if (parsed.pChangeSub !== undefined) setPChangeSub(parsed.pChangeSub);
+                          if (parsed.turnProbability !== undefined) setTurnProbability(parsed.turnProbability);
+                          if (parsed.signalMode !== undefined) setSignalMode(parsed.signalMode);
+                          if (parsed.hRoads !== undefined) setHRoads(parsed.hRoads);
+                          if (parsed.vRoads !== undefined) setVRoads(parsed.vRoads);
+                          if (parsed.intersectionRules !== undefined) setIntersectionRules(parsed.intersectionRules);
+                          
+                          setShowConfigModal(false);
+                          setTimeout(() => initializeSimulation(), 50);
+                        } catch (e) {
+                          alert("JSON 格式有誤，請確認後重試！");
+                        }
+                      }}
+                      style={{ flex: 1, padding: "8px", background: theme.primary, color: "#000", fontWeight: "bold", border: "none", borderRadius: "6px", cursor: "pointer", fontSize: "12px" }}
+                    >
+                      匯入並載入 🚀
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Metrics Panel */}
