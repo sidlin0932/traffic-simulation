@@ -22,7 +22,7 @@ const theme = {
 export default function TrafficSimSpec() {
   // Safely check and retrieve build metadata injected during compilation
   const buildInfo = typeof __BUILD_METADATA__ !== "undefined" ? __BUILD_METADATA__ : {
-    version: "v1.7.2",
+    version: "v1.8.0",
     commitHash: "Dev",
     commitDate: "N/A",
     buildTime: "Local Build"
@@ -44,6 +44,10 @@ export default function TrafficSimSpec() {
   const [turnProbability, setTurnProbability] = useState(0.15);
   const [isPlaying, setIsPlaying] = useState(false);
   const [simSpeed, setSimSpeed] = useState(100); // ms per tick
+  const [naturalMode, setNaturalMode] = useState(false);
+  const [clockDisplay, setClockDisplay] = useState('07:00:00');
+  const [clockPeriod, setClockPeriod] = useState('');
+  const [slidingMetrics, setSlidingMetrics] = useState({});
 
   const [signalMode, setSignalMode] = useState("alternating");
   const [hRoads, setHRoads] = useState([
@@ -216,11 +220,13 @@ export default function TrafficSimSpec() {
       hRoads: hRoads,
       vRoads: vRoads,
       intersectionRules: intersectionRules,
-      simulationSteps: steps,
+      simulationSteps: 9999999, // effectively infinite — GUI controls play/pause
       experimentType: expType,
       exportTrajectories: true,
       segLength: segLength,
       signalMode: signalMode,
+      naturalMode: naturalMode,
+      clockStartHour: 7,
       params: {
         delta_t: deltaT,
         p_change_background: pChangeBg,
@@ -237,6 +243,7 @@ export default function TrafficSimSpec() {
     setActiveVehicles([...s.vehicles]);
     setArrivedCount(0);
     setMetrics({});
+    setSlidingMetrics({});
     setExpResults(null);
     setTrackedVehicleId(null);
     laneInterpolation.current.clear();
@@ -519,6 +526,7 @@ export default function TrafficSimSpec() {
     }
   }, []);
 
+  // Structural param changes reinit the simulation (lane counts change)
   useEffect(() => {
     if (skipReinitRef.current) {
       skipReinitRef.current = false;
@@ -528,21 +536,39 @@ export default function TrafficSimSpec() {
     return () => {
       if (animationRef.current) clearInterval(animationRef.current);
     };
-  }, [segLength, expType, deltaT, pChangeBg, pChangeSub, seed, signalMode, turnProbability, hRoads, vRoads]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [segLength, expType, deltaT, pChangeBg, pChangeSub, seed, signalMode, turnProbability]);
 
-  // Tick step of simulation
+  // Hot-patch inflow rates without reinit — keeps simulation running
+  useEffect(() => {
+    if (!simRef.current) return;
+    const s = simRef.current;
+    s.roadInflowHFwd = hRoads.map(r => r.inflowFwd);
+    s.roadInflowHBwd = hRoads.map(r => r.inflowBwd);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hRoads.map(r => r.inflowFwd + r.inflowBwd).join(',')]);
+
+  useEffect(() => {
+    if (!simRef.current) return;
+    const s = simRef.current;
+    s.roadInflowVFwd = vRoads.map(r => r.inflowFwd);
+    s.roadInflowVBwd = vRoads.map(r => r.inflowBwd);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vRoads.map(r => r.inflowFwd + r.inflowBwd).join(',')]);
+
+  // Reinit if road tier/revMode/count changes (structural)
+  const hRoadsStructuralKey = hRoads.map(r => `${r.tier}-${r.revMode}`).join('|') + hRoads.length;
+  const vRoadsStructuralKey = vRoads.map(r => `${r.tier}-${r.revMode}`).join('|') + vRoads.length;
+  useEffect(() => {
+    if (!simRef.current) return; // Skip on first mount (handled by main reinit effect)
+    initializeSimulation();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hRoadsStructuralKey, vRoadsStructuralKey]);
+
+  // Tick step of simulation — runs indefinitely (GUI-driven, not step-limited)
   const stepSimulation = () => {
     if (!simRef.current) return;
     const s = simRef.current;
-
-    if (s.tick >= s.steps) {
-      setIsPlaying(false);
-      if (animationRef.current) clearInterval(animationRef.current);
-      const res = s.getResults();
-      setMetrics(res.metrics);
-      if (res.experiment_results) setExpResults(res.experiment_results);
-      return;
-    }
 
     // Capture pre-step lane state for interpolation
     const prevLanes = new Map();
@@ -567,9 +593,21 @@ export default function TrafficSimSpec() {
     setActiveVehicles([...s.vehicles]);
     setArrivedCount(s.arrivedVehicles.length);
     
-    const res = s.getResults();
-    setMetrics(res.metrics);
-    if (res.experiment_results) setExpResults(res.experiment_results);
+    // Use sliding window metrics for live display
+    const sw = s.getSlidingWindowResults(1000);
+    setSlidingMetrics(sw);
+
+    // Update virtual clock
+    const clk = s.getVirtualClock();
+    setClockDisplay(clk.display);
+    setClockPeriod(clk.period);
+
+    // Full metrics update (throttled every 50 ticks to avoid perf hit)
+    if (s.tick % 50 === 0) {
+      const res = s.getResults();
+      setMetrics(res.metrics);
+      if (res.experiment_results) setExpResults(res.experiment_results);
+    }
   };
 
   // Play / Pause toggler
@@ -1880,6 +1918,53 @@ export default function TrafficSimSpec() {
 
             <hr style={{ borderColor: "rgba(255,255,255,0.06)", margin: "20px 0" }} />
 
+            {/* Virtual Clock + Natural Mode */}
+            <div style={{
+              background: "rgba(10,15,24,0.6)",
+              border: "1px solid rgba(102,252,241,0.15)",
+              borderRadius: "10px",
+              padding: "12px 14px",
+              marginBottom: "14px"
+            }}>
+              {/* Clock display */}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                <span style={{ fontSize: "10px", color: theme.textMuted, textTransform: "uppercase", letterSpacing: "0.06em" }}>虛擬時鐘 (24h)</span>
+                <span style={{ fontFamily: "monospace", fontSize: "20px", fontWeight: 700, color: theme.primary, letterSpacing: "0.12em" }}>
+                  {clockDisplay || '07:00:00'}
+                </span>
+              </div>
+              {clockPeriod && naturalMode && (
+                <div style={{ textAlign: "center", fontSize: "11px", color: theme.secondary, marginBottom: "8px" }}>{clockPeriod}</div>
+              )}
+              {/* Natural Mode toggle */}
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <span style={{ fontSize: "11px", color: theme.textMuted }}>自然流量模式 (上下班尖峰)</span>
+                <button
+                  id="natural-mode-toggle"
+                  onClick={() => {
+                    const next = !naturalMode;
+                    setNaturalMode(next);
+                    if (simRef.current) {
+                      simRef.current.naturalMode = next;
+                    }
+                  }}
+                  style={{
+                    background: naturalMode ? theme.primary : "#30363d",
+                    color: naturalMode ? "#000" : "#fff",
+                    border: "none",
+                    borderRadius: "20px",
+                    padding: "4px 14px",
+                    fontSize: "11px",
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    transition: "all 0.2s"
+                  }}
+                >
+                  {naturalMode ? '🟢 開啟' : '⚫ 關閉'}
+                </button>
+              </div>
+            </div>
+
             <div style={{ display: "flex", gap: "10px" }}>
               <button
                 onClick={togglePlay}
@@ -1929,7 +2014,7 @@ export default function TrafficSimSpec() {
             }}>
               <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "10px", alignItems: "center" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                  <span style={{ fontSize: "14px", fontWeight: "bold", color: theme.textLight }}>模擬運行狀態 (Tick: {tick} / {steps})</span>
+          <span style={{ fontSize: "14px", fontWeight: "bold", color: theme.textLight }}>模擬運行狀態 (Tick: {tick})</span>
                   <button
                     onClick={() => {
                       const config = {
@@ -1997,95 +2082,142 @@ export default function TrafficSimSpec() {
               </p>
 
               {/* Floating Cards and Overlays */}
-              {selectedIntersection && (
-                <div style={{
-                  position: "absolute",
-                  left: `${selectedIntersection.px + 15}px`,
-                  top: `${selectedIntersection.py + 15}px`,
-                  background: "rgba(31, 40, 51, 0.95)",
-                  border: "2px solid " + theme.primary,
-                  borderRadius: "12px",
-                  padding: "16px",
-                  width: "280px",
-                  zIndex: 1000,
-                  boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
-                  backdropFilter: "blur(8px)",
-                }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
-                    <strong style={{ color: theme.textLight, fontSize: "13px" }}>
-                      路口 (H{selectedIntersection.r}, V{selectedIntersection.c}) 轉向車道自訂
-                    </strong>
-                    <button 
-                      onClick={() => setSelectedIntersection(null)}
-                      style={{ background: "transparent", color: theme.textMuted, border: "none", cursor: "pointer", fontSize: "16px" }}
-                    >
-                      ✕
-                    </button>
+              {selectedIntersection && (() => {
+                const { r, c } = selectedIntersection;
+                const key = `${r}-${c}`;
+                const CYCLE = ['left', 'straight', 'right', 'all'];
+                const ARROW = { left: '⬅', straight: '⬆', right: '➡', all: '⟳' };
+                const COLORS = { left: '#a78bfa', straight: '#67e8f9', right: '#34d399', all: '#fbbf24' };
+
+                const getDefaultRule = (l, total) => {
+                  if (total === 1) return 'all';
+                  if (total === 2) return l === 0 ? 'left' : 'right';
+                  return l === 0 ? 'left' : l === total - 1 ? 'right' : 'straight';
+                };
+
+                const getLaneRule = (roadType, idx, l) => {
+                  const total = sim ? sim.getRoad(roadType, idx).length : 1;
+                  return intersectionRules[key]?.[roadType]?.[l] || getDefaultRule(l, total);
+                };
+
+                const cycleRule = (roadType, idx, l) => {
+                  const total = sim ? sim.getRoad(roadType, idx).length : 1;
+                  const current = getLaneRule(roadType, idx, l);
+                  const next = CYCLE[(CYCLE.indexOf(current) + 1) % CYCLE.length];
+                  const newRules = JSON.parse(JSON.stringify(intersectionRules));
+                  if (!newRules[key]) newRules[key] = {};
+                  if (!newRules[key][roadType]) {
+                    newRules[key][roadType] = Array.from({ length: total }, (_, i) => getDefaultRule(i, total));
+                  }
+                  newRules[key][roadType][l] = next;
+                  setIntersectionRules(newRules);
+                  if (simRef.current) simRef.current.intersectionRules = newRules;
+                };
+
+                // Render a row of lane buttons for one approach
+                const LaneStrip = ({ roadType, idx, dir, label }) => {
+                  const total = sim ? sim.getRoad(roadType, idx).length : 1;
+                  return (
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '3px' }}>
+                      <span style={{ fontSize: '9px', color: theme.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{label}</span>
+                      <div style={{ display: 'flex', gap: '3px' }}>
+                        {Array.from({ length: total }, (_, l) => {
+                          const rule = getLaneRule(roadType, idx, l);
+                          return (
+                            <button
+                              key={l}
+                              title={`車道 ${l} — 點擊切換`}
+                              onClick={() => cycleRule(roadType, idx, l)}
+                              style={{
+                                width: '32px', height: '32px',
+                                background: COLORS[rule] + '22',
+                                border: `2px solid ${COLORS[rule]}`,
+                                borderRadius: '6px',
+                                color: COLORS[rule],
+                                fontSize: '16px',
+                                cursor: 'pointer',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                transition: 'all 0.15s',
+                                fontWeight: 700,
+                                lineHeight: 1,
+                              }}
+                            >
+                              {ARROW[rule]}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                };
+
+                return (
+                  <div style={{
+                    position: 'absolute',
+                    left: `${selectedIntersection.px + 12}px`,
+                    top: `${selectedIntersection.py + 12}px`,
+                    background: 'rgba(13,17,23,0.97)',
+                    border: `2px solid ${theme.primary}`,
+                    borderRadius: '14px',
+                    padding: '14px',
+                    width: '300px',
+                    zIndex: 1000,
+                    boxShadow: '0 12px 40px rgba(0,0,0,0.65)',
+                    backdropFilter: 'blur(12px)',
+                  }}>
+                    {/* Header */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                      <strong style={{ color: theme.textLight, fontSize: '13px' }}>
+                        路口 H{r}×V{c} — 圖形化車道設定
+                      </strong>
+                      <button onClick={() => setSelectedIntersection(null)}
+                        style={{ background: 'transparent', color: theme.textMuted, border: 'none', cursor: 'pointer', fontSize: '16px', lineHeight: 1 }}>✕</button>
+                    </div>
+
+                    {/* 2D Intersection Diagram */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', gridTemplateRows: 'auto auto auto', gap: '6px', alignItems: 'center', justifyItems: 'center' }}>
+
+                      {/* Row 0: Top — vFwd (North → South) */}
+                      <div />
+                      <LaneStrip roadType="vFwd" idx={c} label="⬇ 北入口→南" />
+                      <div />
+
+                      {/* Row 1: Middle — hBwd (East→West) | center box | hFwd (West→East) */}
+                      <LaneStrip roadType="hBwd" idx={r} label="← 東入口→西" />
+                      <div style={{
+                        width: '52px', height: '52px',
+                        background: 'rgba(102,252,241,0.06)',
+                        border: '2px solid rgba(102,252,241,0.25)',
+                        borderRadius: '6px',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: '10px', color: theme.primary, fontWeight: 700, textAlign: 'center', lineHeight: 1.2
+                      }}>
+                        H{r}<br/>V{c}
+                      </div>
+                      <LaneStrip roadType="hFwd" idx={r} label="→ 西入口→東" />
+
+                      {/* Row 2: Bottom — vBwd (South → North) */}
+                      <div />
+                      <LaneStrip roadType="vBwd" idx={c} label="⬆ 南入口→北" />
+                      <div />
+                    </div>
+
+                    {/* Legend */}
+                    <div style={{ display: 'flex', gap: '8px', marginTop: '10px', flexWrap: 'wrap', justifyContent: 'center' }}>
+                      {CYCLE.map(r => (
+                        <span key={r} style={{ display: 'flex', alignItems: 'center', gap: '3px', fontSize: '10px', color: COLORS[r] }}>
+                          <span style={{ fontSize: '13px' }}>{ARROW[r]}</span>
+                          {r === 'left' ? '左轉' : r === 'straight' ? '直行' : r === 'right' ? '右轉' : '全開放'}
+                        </span>
+                      ))}
+                    </div>
+                    <p style={{ fontSize: '9px', color: theme.textMuted, margin: '6px 0 0 0', textAlign: 'center' }}>
+                      點擊車道方塊循環切換規則 · 即時生效不重置
+                    </p>
                   </div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: "12px", maxHeight: "250px", overflowY: "auto", paddingRight: "4px" }}>
-                    {[
-                      { label: "⬅️ 西側入口 (向東)", roadType: "hFwd", idx: selectedIntersection.r },
-                      { label: "➡️ 東側入口 (向西)", roadType: "hBwd", idx: selectedIntersection.r },
-                      { label: "⬇️ 北側入口 (向南)", roadType: "vFwd", idx: selectedIntersection.c },
-                      { label: "⬆️ 南側入口 (向北)", roadType: "vBwd", idx: selectedIntersection.c },
-                    ].map((leg) => {
-                      const lanes = sim ? sim.getRoad(leg.roadType, leg.idx) : null;
-                      if (!lanes) return null;
-                      const totalLanes = lanes.length;
-                      const key = `${selectedIntersection.r}-${selectedIntersection.c}`;
-                      const currentRules = intersectionRules[key]?.[leg.roadType] || [];
-                      return (
-                        <div key={leg.roadType} style={{ borderBottom: "1px solid rgba(255,255,255,0.06)", paddingBottom: "8px" }}>
-                          <span style={{ fontSize: "11px", color: theme.secondary, fontWeight: "bold" }}>{leg.label}</span>
-                          <div style={{ display: "flex", gap: "6px", marginTop: "4px" }}>
-                            {Array.from({ length: totalLanes }).map((_, l) => {
-                              let val = currentRules[l];
-                              if (!val) {
-                                if (totalLanes === 1) val = "all";
-                                else if (totalLanes === 2) val = (l === 0 ? "left" : "right");
-                                else val = (l === 0 ? "left" : (l === totalLanes - 1 ? "right" : "straight"));
-                              }
-                              return (
-                                <div key={l} style={{ flex: 1, display: "flex", flexDirection: "column", gap: "2px" }}>
-                                  <span style={{ fontSize: "9px", color: theme.textMuted, textAlign: "center" }}>車道 {l}</span>
-                                  <select
-                                    value={val}
-                                    onChange={(e) => {
-                                      const newRules = { ...intersectionRules };
-                                      if (!newRules[key]) newRules[key] = {};
-                                      if (!newRules[key][leg.roadType]) {
-                                        newRules[key][leg.roadType] = Array.from({ length: totalLanes }).map((_, i) => {
-                                          if (totalLanes === 1) return "all";
-                                          if (totalLanes === 2) return (i === 0 ? "left" : "right");
-                                          return (i === 0 ? "left" : (i === totalLanes - 1 ? "right" : "straight"));
-                                        });
-                                      }
-                                      newRules[key][leg.roadType][l] = e.target.value;
-                                      setIntersectionRules(newRules);
-                                      if (simRef.current) {
-                                        simRef.current.intersectionRules = newRules;
-                                      }
-                                    }}
-                                    style={{
-                                      background: "#0b0c10", color: theme.primary, border: "1px solid rgba(255,255,255,0.15)",
-                                      borderRadius: "4px", fontSize: "10px", padding: "2px 4px", cursor: "pointer", outline: "none"
-                                    }}
-                                  >
-                                    <option value="left">左轉 ⬅️</option>
-                                    <option value="straight">直行 ⬆️</option>
-                                    <option value="right">右轉 ➡️</option>
-                                    <option value="all">全開放 🔄</option>
-                                  </select>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
+                );
+              })()}
+
 
               {selectedRoadConfig && (
                 <div style={{
@@ -2262,24 +2394,29 @@ export default function TrafficSimSpec() {
               )}
             </div>
 
-            {/* Metrics Panel */}
+            {/* Metrics Panel — sliding-window live stats */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px" }}>
-              {/* General Metrics */}
+              {/* Sliding Window General Metrics */}
               <div style={{
                 background: "rgba(31, 40, 51, 0.45)",
                 border: "1px solid rgba(255,255,255,0.06)",
                 borderRadius: "16px",
                 padding: "20px"
               }}>
-                <h3 style={{ margin: "0 0 14px 0", color: theme.textLight, fontSize: "15px" }}>車流統計數據</h3>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px" }}>
+                  <h3 style={{ margin: 0, color: theme.textLight, fontSize: "15px" }}>車流統計 (近 1000 Ticks)</h3>
+                  <span style={{ fontSize: "10px", color: theme.textMuted, fontFamily: "monospace" }}>
+                    {slidingMetrics.window_ticks ? `Δ${slidingMetrics.window_ticks} ticks` : ''}
+                  </span>
+                </div>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
                   {[
-                    { label: "活躍車輛數", val: activeVehicles.length },
-                    { label: "駛離車輛數", val: arrivedCount },
-                    { label: "背景車平均速度", val: metrics.avg_speed_background ? `${metrics.avg_speed_background} cells/tick` : "計算中..." },
-                    { label: "背景車平均旅行時間", val: metrics.avg_travel_time_background ? `${metrics.avg_travel_time_background} ticks` : "計算中..." },
-                    { label: "背景車平均延滯", val: metrics.avg_delay_background ? `${metrics.avg_delay_background} ticks` : "計算中..." },
-                    { label: "幽靈塞車偵測次數", val: metrics.phantom_jams_detected ?? 0 }
+                    { label: "活躍車輛數", val: slidingMetrics.active_vehicles ?? activeVehicles.length },
+                    { label: "累計駛離數", val: slidingMetrics.arrived_total ?? arrivedCount },
+                    { label: "窗口吞吐 (背景)", val: slidingMetrics.throughput_window != null ? `${slidingMetrics.throughput_window} 輛` : "計算中..." },
+                    { label: "平均速度 (窗口)", val: slidingMetrics.avg_speed_window != null ? `${slidingMetrics.avg_speed_window} c/t` : "計算中..." },
+                    { label: "平均延滯 (窗口)", val: slidingMetrics.avg_delay_window != null ? `${slidingMetrics.avg_delay_window} t` : "計算中..." },
+                    { label: "幽靈塞車 (窗口)", val: slidingMetrics.phantom_jams_window ?? 0 }
                   ].map((stat, idx) => (
                     <div key={idx} style={{ background: "#161b22", padding: "10px", borderRadius: "8px" }}>
                       <span style={{ fontSize: "11px", color: theme.textMuted, display: "block" }}>{stat.label}</span>

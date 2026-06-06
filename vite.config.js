@@ -20,7 +20,7 @@ export default defineConfig({
   base: './',
   define: {
     __BUILD_METADATA__: JSON.stringify({
-      version: 'v1.7.2',
+      version: 'v1.8.0',
       commitHash,
       commitDate,
       buildTime,

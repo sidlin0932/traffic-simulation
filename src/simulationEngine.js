@@ -161,6 +161,18 @@ export class GridSimulation {
     this.tick = 0;
     this.vehicleIdCounter = 0;
 
+    // Natural Mode (time-of-day traffic scaling)
+    this.naturalMode = config.naturalMode || false;
+    // Virtual clock: starts at 07:00:00 by default (configurable)
+    const startHour = config.clockStartHour != null ? config.clockStartHour : 7;
+    this.clockSeconds = startHour * 3600; // 1 tick = 1 virtual second
+
+    // Sliding window for metrics (last N ticks)
+    this.metricWindowSize = 1000;
+    this.tickArrivals = []; // [{ tick, travelTime }] ring buffer
+    this.tickSpeedSamples = []; // [{ tick, speeds: [] }] ring buffer
+    this.tickPhantomJams = []; // [{ tick, count }]
+
     // Signal configuration
     this.signalMode = config.signalMode || params.signalMode || 'alternating'; // all_sync, alternating, green_wave, adaptive
     this.lightCycle = 30;
@@ -229,6 +241,7 @@ export class GridSimulation {
     this.phantomJamCount = 0;
     this.sectorSpeeds = {}; // key: "roadType-roadIdx-lane-sectorIdx", value: list of speeds
     this.warmup = 200;
+    this.tickPhantomJamTotal = 0; // total phantom jam events for sliding window
 
     // Initialize roads with background cars
     this.populateInitialVehicles();
@@ -496,11 +509,23 @@ export class GridSimulation {
 
     // 3. Inject Background Vehicles at entry cells dynamically to maintain flow
 
+    // Calculate Natural Mode time-of-day multiplier
+    let naturalMultiplier = 1.0;
+    if (this.naturalMode) {
+      const totalSec = this.clockSeconds % 86400;
+      const hhmm = totalSec / 3600; // decimal hours
+      if (hhmm >= 7.5 && hhmm < 9.5) naturalMultiplier = 1.8;       // Morning peak 07:30-09:30
+      else if (hhmm >= 17.0 && hhmm < 19.5) naturalMultiplier = 1.8;  // Evening peak 17:00-19:30
+      else if (hhmm >= 22.0 || hhmm < 6.0) naturalMultiplier = 0.2;   // Night 22:00-06:00
+      else if (hhmm >= 12.0 && hhmm < 13.5) naturalMultiplier = 1.3;  // Lunch rush 12:00-13:30
+      else naturalMultiplier = 1.0;
+    }
+
     // Horizontal roads — fwd (eastbound) and bwd (westbound) with independent inflow
     for (let r = 0; r < this.g.NUM_H; r++) {
       const vMax = this.getRoadSpeedLimit('hFwd', r);
-      const spawnFwd = this.roadInflowHFwd[r] * 0.8;
-      const spawnBwd = this.roadInflowHBwd[r] * 0.8;
+      const spawnFwd = Math.min(1, this.roadInflowHFwd[r] * 0.8 * naturalMultiplier);
+      const spawnBwd = Math.min(1, this.roadInflowHBwd[r] * 0.8 * naturalMultiplier);
 
       for (let lane = 0; lane < this.hFwd[r].length; lane++) {
         if (this.hFwd[r][lane][0] === null && this.hFwd[r][lane][1] === null && this.rng() < spawnFwd) {
@@ -532,8 +557,8 @@ export class GridSimulation {
     // Vertical roads — fwd (southbound) and bwd (northbound) with independent inflow
     for (let c = 0; c < this.g.NUM_V; c++) {
       const vMax = this.getRoadSpeedLimit('vFwd', c);
-      const spawnFwd = this.roadInflowVFwd[c] * 0.8;
-      const spawnBwd = this.roadInflowVBwd[c] * 0.8;
+      const spawnFwd = Math.min(1, this.roadInflowVFwd[c] * 0.8 * naturalMultiplier);
+      const spawnBwd = Math.min(1, this.roadInflowVBwd[c] * 0.8 * naturalMultiplier);
 
       for (let lane = 0; lane < this.vFwd[c].length; lane++) {
         if (this.vFwd[c][lane][0] === null && this.vFwd[c][lane][1] === null && this.rng() < spawnFwd) {
@@ -908,16 +933,22 @@ export class GridSimulation {
         }
       }
       car.isVampire = isVampire;
-      // Keep intersection clear (路口淨空) check
-      // If the next cell would be exactly an intersection cell, we must not enter it if we cannot clear it.
+      // Keep intersection clear (路口淨空) check — prevents queue spillback deadlocks
+      // A vehicle must NOT enter the intersection cell unless it can fully clear it.
+      // We block entry if:
+      //   a) The exit cell (p+1) is already occupied, OR
+      //   b) The vehicle at p+1 or p+2 is stopped/slow (v <= 1) — exit lane is congested
       if (car.type !== 'emergency') {
         const interPosList = intersections.map(p => (roadType === 'hBwd' || roadType === 'vBwd') ? mirror(p, maxLen) : p);
         const rd = this.getRoad(roadType, idx)[lane];
         for (const p of interPosList) {
-          if (x < p && (x + v) === p) {
-            // Only stop if the exit cell (p + 1) is blocked
-            if (p + 1 < rd.length && rd[p + 1] !== null) {
-              v = p - x - 1;
+          if (x < p && (x + v) >= p) {
+            // Check if the exit zone (p+1, p+2) is blocked or congested
+            const exit1Blocked = p + 1 < rd.length && rd[p + 1] !== null;
+            const exit2Congested = p + 2 < rd.length && rd[p + 2] !== null && rd[p + 2].v <= 1;
+            const exit1Congested = p + 1 < rd.length && rd[p + 1] !== null && rd[p + 1].v <= 1;
+            if (exit1Blocked || exit1Congested || exit2Congested) {
+              v = Math.max(0, p - x - 1); // stop just before intersection
               break;
             }
           }
@@ -1288,6 +1319,24 @@ export class GridSimulation {
     this.runLongitudinalMovement();
     this.updateAlleys();
     this.monitorSectors();
+
+    // Advance virtual clock (1 tick = 1 virtual second)
+    this.clockSeconds = (this.clockSeconds + 1) % 86400;
+
+    // Record sliding window speed samples for this tick
+    const tickSpeeds = [];
+    for (const car of this.vehicles) {
+      if (car.type === 'background') tickSpeeds.push(car.v);
+    }
+    this.tickSpeedSamples.push({ tick: this.tick, speeds: tickSpeeds });
+    if (this.tickSpeedSamples.length > this.metricWindowSize) this.tickSpeedSamples.shift();
+
+    // Record phantom jam activity (for sliding window)
+    const prevPhamtomTotal = this.tickPhantomJamTotal;
+    this.tickPhantomJamTotal = this.phantomJamCount;
+    this.tickPhantomJams.push({ tick: this.tick, count: this.phantomJamCount - prevPhamtomTotal });
+    if (this.tickPhantomJams.length > this.metricWindowSize) this.tickPhantomJams.shift();
+
     this.tick++;
   }
 
@@ -1372,6 +1421,74 @@ export class GridSimulation {
       metrics,
       experiment_results: this.experimentType === 'B2' ? results : undefined,
       trajectories: this.exportTrajectories ? trajectoriesOut : undefined
+    };
+  }
+
+  // Get virtual clock state as object { h, m, s, display }
+  getVirtualClock() {
+    const totalSec = this.clockSeconds % 86400;
+    const h = Math.floor(totalSec / 3600);
+    const m = Math.floor((totalSec % 3600) / 60);
+    const s = totalSec % 60;
+    const pad = n => String(n).padStart(2, '0');
+    const display = `${pad(h)}:${pad(m)}:${pad(s)}`;
+
+    // Natural mode period label
+    let period = '日常';
+    if (this.naturalMode) {
+      const hDec = h + m / 60;
+      if (hDec >= 7.5 && hDec < 9.5) period = '🚗 早峰 Morning Peak';
+      else if (hDec >= 17.0 && hDec < 19.5) period = '🚗 晚峰 Evening Peak';
+      else if (hDec >= 22.0 || hDec < 6.0) period = '🌙 深夜 Night';
+      else if (hDec >= 12.0 && hDec < 13.5) period = '🍱 午間 Lunch';
+      else period = '🌤️ 日常 Normal';
+    }
+    return { h, m, s, display, period };
+  }
+
+  // Get sliding window results over last N ticks
+  getSlidingWindowResults(windowSize = 1000) {
+    const cutoffTick = this.tick - windowSize;
+
+    // Speed average from recent ticks
+    let speedSum = 0;
+    let speedCount = 0;
+    for (const sample of this.tickSpeedSamples) {
+      if (sample.tick >= cutoffTick) {
+        for (const spd of sample.speeds) {
+          speedSum += spd;
+          speedCount++;
+        }
+      }
+    }
+    const avgSpeed = speedCount > 0 ? speedSum / speedCount : 0;
+
+    // Arrivals from arrivedVehicles list in recent window
+    const recentArrivals = this.arrivedVehicles.filter(
+      c => c.type === 'background' && c.exitTick != null && c.exitTick >= cutoffTick
+    );
+    const throughput = recentArrivals.length;
+    const avgTravelTime = recentArrivals.length > 0
+      ? recentArrivals.reduce((s, c) => s + (c.exitTick - c.spawnTick), 0) / recentArrivals.length
+      : 0;
+    const avgDelay = Math.max(0, avgTravelTime - (this.g.HLEN / this.vMaxBg));
+
+    // Phantom jams in recent window
+    const phantomJamsWindow = this.tickPhantomJams
+      .filter(t => t.tick >= cutoffTick)
+      .reduce((s, t) => s + t.count, 0);
+
+    // Currently active vehicles
+    const activeCount = this.vehicles.length;
+
+    return {
+      window_ticks: Math.min(this.tick, windowSize),
+      throughput_window: throughput,
+      avg_speed_window: Number(avgSpeed.toFixed(3)),
+      avg_delay_window: Number(avgDelay.toFixed(1)),
+      phantom_jams_window: Math.floor(phantomJamsWindow / 5),
+      active_vehicles: activeCount,
+      arrived_total: this.arrivedVehicles.length,
     };
   }
 }
